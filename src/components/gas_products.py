@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QComboBox, QDoubleSpinBox, QTextEdit, QHeaderView)
 from PySide6.QtCore import Qt
-from database import DatabaseManager
+from database_module import DatabaseManager
 
 class AddGasProductDialog(QDialog):
     def __init__(self, db_manager: DatabaseManager, parent=None, product_data=None):

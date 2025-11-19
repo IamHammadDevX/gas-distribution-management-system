@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
                                QFileDialog)
 from PySide6.QtCore import Qt, QDate
-from database import DatabaseManager
+from database_module import DatabaseManager
 from datetime import datetime, timedelta
 import csv
 import json

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                                QLineEdit, QPushButton, QFormLayout, QMessageBox)
 from PySide6.QtCore import Qt
-from database import DatabaseManager
+from database_module import DatabaseManager
 import hashlib
 
 class LoginDialog(QDialog):

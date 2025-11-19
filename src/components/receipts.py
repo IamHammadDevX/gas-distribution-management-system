@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTextEdit, QHeaderView, QGroupBox, QGridLayout)
 from PySide6.QtCore import Qt, QDateTime
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from database import DatabaseManager
+from database_module import DatabaseManager
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

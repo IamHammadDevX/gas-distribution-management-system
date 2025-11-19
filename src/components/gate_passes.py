@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QComboBox, QSpinBox, QGroupBox, QTextEdit, QHeaderView,
                                QDateTimeEdit, QCheckBox)
 from PySide6.QtCore import Qt, QDateTime
-from database import DatabaseManager
+from database_module import DatabaseManager
 from datetime import datetime
 
 class GatePassDialog(QDialog):

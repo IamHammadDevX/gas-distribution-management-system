@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox,
                                QTextEdit, QHeaderView, QGridLayout)
 from PySide6.QtCore import Qt, QDateTime
-from database import DatabaseManager
+from database_module import DatabaseManager
 from datetime import datetime
 
 class SalesWidget(QWidget):
@@ -219,6 +219,7 @@ class SalesWidget(QWidget):
             self.remove_from_cart_btn.setEnabled(False)
             self.clear_cart_btn.setEnabled(False)
             self.clear_form_btn.setEnabled(False)
+            self.generate_receipt_btn.setEnabled(False)
     
     def load_gas_products(self):
         """Load gas products from database"""
@@ -528,8 +529,114 @@ class SalesWidget(QWidget):
                     self.recent_sales_table.item(row, 6).setForeground(Qt.darkYellow)
                 else:
                     self.recent_sales_table.item(row, 6).setForeground(Qt.darkGreen)
+                
+                # Add Generate Receipt button
+                generate_btn = QPushButton("Generate Receipt")
+                generate_btn.clicked.connect(lambda checked, s=sale: self.generate_receipt_for_sale(s))
+                self.recent_sales_table.setCellWidget(row, 7, generate_btn)
             
             self.recent_sales_table.resizeColumnsToContents()
             
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load recent sales: {str(e)}")
+    
+    def generate_receipt_for_selected(self):
+        """Generate receipt for the selected sale in recent sales table"""
+        selected_items = self.recent_sales_table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Selection Error", "Please select a sale from the recent sales table.")
+            return
+        
+        # Get the row of the first selected item
+        row = selected_items[0].row()
+        
+        # Get the sale data from the table (we need to query the database to get complete sale info)
+        try:
+            # Get sale ID from the recent sales data (we need to modify our query to include sale ID)
+            query = '''
+                SELECT s.id, s.*, c.name as client_name, c.phone as client_phone,
+                       gp.gas_type, gp.sub_type, gp.capacity
+                FROM sales s
+                JOIN clients c ON s.client_id = c.id
+                JOIN gas_products gp ON s.gas_product_id = gp.id
+                ORDER BY s.created_at DESC
+                LIMIT 20
+            '''
+            sales = self.db_manager.execute_query(query)
+            
+            if row < len(sales):
+                selected_sale = sales[row]
+                self.generate_receipt_for_sale(selected_sale)
+            else:
+                QMessageBox.warning(self, "Error", "Could not find the selected sale.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to get sale details: {str(e)}")
+    
+    def generate_receipt_for_sale(self, sale):
+        """Generate receipt for a specific sale"""
+        try:
+            # Check if receipt already exists for this sale
+            existing_receipt = self.db_manager.execute_query(
+                "SELECT * FROM receipts WHERE sale_id = ?", 
+                (sale['id'],)
+            )
+            
+            if existing_receipt:
+                QMessageBox.information(self, "Info", "Receipt already exists for this sale. Opening existing receipt...")
+                self.open_receipt(existing_receipt[0])
+                return
+            
+            # Generate new receipt
+            receipt_number = self.db_manager.get_next_receipt_number()
+            receipt_id = self.db_manager.create_receipt(
+                receipt_number=receipt_number,
+                sale_id=sale['id'],
+                client_id=sale['client_id'],
+                total_amount=sale['total_amount'],
+                amount_paid=sale['amount_paid'],
+                balance=sale['balance'],
+                created_by=self.current_user['id']
+            )
+            
+            if receipt_id:
+                # Get the newly created receipt
+                new_receipt = self.db_manager.execute_query(
+                    "SELECT * FROM receipts WHERE id = ?", 
+                    (receipt_id,)
+                )[0]
+                
+                QMessageBox.information(self, "Success", f"Receipt {receipt_number} generated successfully!")
+                self.open_receipt(new_receipt)
+                self.load_recent_sales()  # Refresh the table
+            else:
+                QMessageBox.critical(self, "Error", "Failed to create receipt.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to generate receipt: {str(e)}")
+    
+    def open_receipt(self, receipt):
+        """Open receipt dialog for viewing/printing"""
+        try:
+            # Import the receipts module
+            from receipts import ReceiptDialog
+            
+            # Get complete receipt data
+            receipt_data = self.db_manager.execute_query('''
+                SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
+                       gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.unit_price, 
+                       s.subtotal, s.tax_amount, s.total_amount, u.full_name as cashier_name
+                FROM receipts r
+                JOIN clients c ON r.client_id = c.id
+                JOIN sales s ON r.sale_id = s.id
+                JOIN gas_products gp ON s.gas_product_id = gp.id
+                JOIN users u ON r.created_by = u.id
+                WHERE r.id = ?
+            ''', (receipt['id'],))[0]
+            
+            # Open receipt dialog
+            dialog = ReceiptDialog(self.db_manager, receipt_data, self)
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open receipt: {str(e)}")

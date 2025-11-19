@@ -2,15 +2,15 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                                QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar)
 from PySide6.QtCore import Qt, QTimer, QDateTime
 from PySide6.QtGui import QFont
-from database import DatabaseManager
-from clients import ClientsWidget
-from gas_products import GasProductsWidget
-from sales import SalesWidget
-from receipts import ReceiptsWidget
-from gate_passes import GatePassesWidget
-from employees import EmployeesWidget
-from reports import ReportsWidget
-from settings import SettingsWidget
+from database_module import DatabaseManager
+from components.clients import ClientsWidget
+from components.gas_products import GasProductsWidget
+from components.sales import SalesWidget
+from components.receipts import ReceiptsWidget
+from components.gate_passes import GatePassesWidget
+from components.employees import EmployeesWidget
+from components.reports import ReportsWidget
+from components.settings import SettingsWidget
 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -397,6 +397,47 @@ class MainWindow(QMainWindow):
             'today_sales': today_sales
         }
     
+    def refresh_dashboard(self):
+        """Refresh dashboard statistics"""
+        try:
+            stats = self.get_dashboard_stats()
+            
+            # Update the dashboard widget if it exists
+            if 'dashboard' in self.widgets:
+                dashboard_widget = self.widgets['dashboard']
+                self.update_dashboard_stats(dashboard_widget, stats)
+                
+        except Exception as e:
+            print(f"Error refreshing dashboard: {str(e)}")
+    
+    def update_dashboard_stats(self, dashboard_widget, stats):
+        """Update dashboard statistics display"""
+        try:
+            # Find all stat cards in the dashboard widget
+            stat_cards = dashboard_widget.findChildren(QFrame)
+            
+            # Update the stat card values
+            for card in stat_cards:
+                # Find the labels within each card
+                labels = card.findChildren(QLabel)
+                if len(labels) >= 2:
+                    title_label = labels[0]
+                    value_label = labels[1]
+                    
+                    # Update based on title
+                    title = title_label.text()
+                    if title == "Total Clients":
+                        value_label.setText(str(stats['total_clients']))
+                    elif title == "Total Sales":
+                        value_label.setText(f"Rs. {stats['total_sales']:,.2f}")
+                    elif title == "Outstanding Balance":
+                        value_label.setText(f"Rs. {stats['outstanding_balance']:,.2f}")
+                    elif title == "Today's Sales":
+                        value_label.setText(f"Rs. {stats['today_sales']:,.2f}")
+                        
+        except Exception as e:
+            print(f"Error updating dashboard stats: {str(e)}")
+    
     def set_role_permissions(self):
         """Set permissions based on user role"""
         role = self.current_user['role']
@@ -427,6 +468,9 @@ class MainWindow(QMainWindow):
             # Switch content
             self.content_area.setCurrentWidget(self.widgets[page_name])
             
+            # Refresh the current page data
+            self.refresh_current_page(page_name)
+            
             # Update status bar
             page_titles = {
                 "dashboard": "Dashboard",
@@ -440,6 +484,40 @@ class MainWindow(QMainWindow):
                 "settings": "Settings"
             }
             self.status_bar.showMessage(f"{page_titles.get(page_name, page_name)} - {self.current_user['full_name']}")
+    
+    def refresh_current_page(self, page_name: str):
+        """Refresh the current page data"""
+        try:
+            if page_name == "dashboard":
+                self.refresh_dashboard()
+            elif page_name == "clients":
+                if hasattr(self.widgets['clients'], 'load_clients'):
+                    self.widgets['clients'].load_clients()
+            elif page_name == "gas_products":
+                if hasattr(self.widgets['gas_products'], 'load_products'):
+                    self.widgets['gas_products'].load_products()
+            elif page_name == "sales":
+                if hasattr(self.widgets['sales'], 'load_gas_products'):
+                    self.widgets['sales'].load_gas_products()
+                if hasattr(self.widgets['sales'], 'load_recent_sales'):
+                    self.widgets['sales'].load_recent_sales()
+            elif page_name == "receipts":
+                if hasattr(self.widgets['receipts'], 'load_receipts'):
+                    self.widgets['receipts'].load_receipts()
+            elif page_name == "gate_passes":
+                if hasattr(self.widgets['gate_passes'], 'load_gate_passes'):
+                    self.widgets['gate_passes'].load_gate_passes()
+            elif page_name == "employees":
+                if hasattr(self.widgets['employees'], 'load_employees'):
+                    self.widgets['employees'].load_employees()
+            elif page_name == "reports":
+                if hasattr(self.widgets['reports'], 'refresh_data'):
+                    self.widgets['reports'].refresh_data()
+            elif page_name == "settings":
+                if hasattr(self.widgets['settings'], 'load_settings'):
+                    self.widgets['settings'].load_settings()
+        except Exception as e:
+            print(f"Error refreshing {page_name}: {str(e)}")
     
     def logout(self):
         """Handle logout"""
