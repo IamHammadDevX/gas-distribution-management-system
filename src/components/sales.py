@@ -96,7 +96,11 @@ class SalesWidget(QWidget):
         
         self.total_label = QLabel("Rs. 0.00")
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px; color: #27ae60;")
-        totals_layout.addRow("Total Amount:", self.total_label)
+        totals_layout.addRow("Current Product Total:", self.total_label)
+        
+        self.cart_total_label = QLabel("Rs. 0.00")
+        self.cart_total_label.setStyleSheet("font-weight: bold; font-size: 18px; color: #e74c3c;")
+        totals_layout.addRow("Cart Total:", self.cart_total_label)
         
         self.amount_paid_spinbox = QDoubleSpinBox()
         self.amount_paid_spinbox.setRange(0, 100000)
@@ -305,7 +309,7 @@ class SalesWidget(QWidget):
             self.calculate_totals()
     
     def calculate_totals(self):
-        """Calculate subtotal, tax, and total"""
+        """Calculate subtotal, tax, and total for current product selection"""
         quantity = self.quantity_spinbox.value()
         unit_price = self.unit_price_spinbox.value()
         
@@ -313,26 +317,27 @@ class SalesWidget(QWidget):
         tax = subtotal * 0.16  # 16% tax
         total = subtotal + tax
         
+        # Update labels with current product totals (not cart totals)
         self.subtotal_label.setText(f"Rs. {subtotal:,.2f}")
         self.tax_label.setText(f"Rs. {tax:,.2f}")
         self.total_label.setText(f"Rs. {total:,.2f}")
         
-        # Set default payment amount to total
-        if self.amount_paid_spinbox.value() == 0:
-            self.amount_paid_spinbox.setValue(total)
+        # Set default payment amount to cart total, not single product total
+        if self.amount_paid_spinbox.value() == 0 and self.current_products:
+            cart_total = sum(item['total'] for item in self.current_products)
+            self.amount_paid_spinbox.setValue(cart_total)
         
         self.calculate_balance()
     
     def calculate_balance(self):
-        """Calculate balance after payment"""
-        quantity = self.quantity_spinbox.value()
-        unit_price = self.unit_price_spinbox.value()
-        subtotal = quantity * unit_price
-        tax = subtotal * 0.16
-        total = subtotal + tax
+        """Calculate balance after payment based on cart total"""
+        # Calculate total from cart, not just current product
+        total_subtotal = sum(item['subtotal'] for item in self.current_products)
+        total_tax = sum(item['tax'] for item in self.current_products)
+        total_amount = sum(item['total'] for item in self.current_products)
         amount_paid = self.amount_paid_spinbox.value()
         
-        balance = total - amount_paid
+        balance = total_amount - amount_paid
         self.balance_label.setText(f"Rs. {balance:,.2f}")
         
         # Change color based on balance
@@ -342,6 +347,20 @@ class SalesWidget(QWidget):
             self.balance_label.setStyleSheet("font-weight: bold; color: #f39c12;")
         else:
             self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
+        
+        # Update cart total display
+        self.cart_total_label.setText(f"Rs. {total_amount:,.2f}")
+        
+        # Update the current product totals display (keep them separate from cart totals)
+        quantity = self.quantity_spinbox.value()
+        unit_price = self.unit_price_spinbox.value()
+        current_subtotal = quantity * unit_price
+        current_tax = current_subtotal * 0.16
+        current_total = current_subtotal + current_tax
+        
+        self.subtotal_label.setText(f"Rs. {current_subtotal:,.2f}")
+        self.tax_label.setText(f"Rs. {current_tax:,.2f}")
+        self.total_label.setText(f"Rs. {current_total:,.2f}")
     
     def add_to_cart(self):
         """Add product to cart"""
@@ -420,6 +439,8 @@ class SalesWidget(QWidget):
         """Clear all items from cart"""
         self.current_products.clear()
         self.update_cart_table()
+        self.cart_total_label.setText("Rs. 0.00")
+        self.calculate_balance()
     
     def clear_form(self):
         """Clear the sales form"""
@@ -429,13 +450,14 @@ class SalesWidget(QWidget):
     
     def set_full_payment(self):
         """Set payment amount to total amount"""
-        # Get current total from the total label
-        total_text = self.total_label.text().replace("Rs. ", "").replace(",", "")
-        try:
-            total_amount = float(total_text)
-            self.amount_paid_spinbox.setValue(total_amount)
-        except ValueError:
-            pass
+        # Calculate total from current products instead of parsing label
+        if not self.current_products:
+            QMessageBox.warning(self, "Validation Error", "Please add products to cart first.")
+            return
+            
+        total_amount = sum(item['total'] for item in self.current_products)
+        self.amount_paid_spinbox.setValue(total_amount)
+        self.calculate_balance()
     
     def clear_payment(self):
         """Clear payment amount"""
@@ -464,10 +486,38 @@ class SalesWidget(QWidget):
             self.amount_paid_spinbox.setFocus()
             return
         
+        # Check if payment is less than total (partial payment)
+        if amount_paid < total_amount:
+            reply = QMessageBox.question(
+                self,
+                "Partial Payment Confirmation",
+                f"The payment amount (Rs. {amount_paid:,.2f}) is less than the total amount (Rs. {total_amount:,.2f}).\n"
+                f"This will create a balance of Rs. {balance:,.2f}.\n\n"
+                "Do you want to proceed with partial payment?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        elif amount_paid > total_amount:
+            # Overpayment confirmation
+            reply = QMessageBox.question(
+                self,
+                "Overpayment Confirmation",
+                f"The payment amount (Rs. {amount_paid:,.2f}) is more than the total amount (Rs. {total_amount:,.2f}).\n"
+                f"This will create a credit of Rs. {abs(balance):,.2f}.\n\n"
+                "Do you want to proceed with overpayment?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
         # Confirm sale
         reply = QMessageBox.question(
             self,
             "Confirm Sale",
+            f"Client: {self.current_client['name']}\n"
             f"Total Amount: Rs. {total_amount:,.2f}\n"
             f"Amount Paid: Rs. {amount_paid:,.2f}\n"
             f"Balance: Rs. {balance:,.2f}\n\n"
@@ -478,42 +528,64 @@ class SalesWidget(QWidget):
         
         if reply == QMessageBox.Yes:
             try:
-                # For simplicity, we'll create one sale record per cart
-                # In a real application, you might want to handle multiple products differently
+                # Store current client info before clearing
+                current_client_id = self.current_client['id']
+                current_client_name = self.current_client['name']
                 
-                # Use the first product as the main product (you might want to modify this logic)
-                first_product = self.current_products[0]
-                
-                # Create sale record
-                sale_id = self.db_manager.create_sale(
-                    client_id=self.current_client['id'],
-                    gas_product_id=first_product['product']['id'],
-                    quantity=first_product['quantity'],
-                    unit_price=first_product['unit_price'],
-                    subtotal=total_subtotal,
-                    tax_amount=total_tax,
-                    total_amount=total_amount,
-                    amount_paid=amount_paid,
-                    balance=balance,
-                    created_by=self.current_user['id']
-                )
+                # For multiple products, create a summary sale record
+                # Use the first product as representative, but include total quantities and amounts
+                if len(self.current_products) > 1:
+                    # For multiple products, create a summary entry
+                    first_product = self.current_products[0]
+                    total_quantity = sum(item['quantity'] for item in self.current_products)
+                    
+                    # Create sale record with summary information
+                    sale_id = self.db_manager.create_sale(
+                        client_id=current_client_id,
+                        gas_product_id=first_product['product']['id'],
+                        quantity=total_quantity,  # Total quantity of all products
+                        unit_price=total_subtotal / total_quantity if total_quantity > 0 else 0,  # Average unit price
+                        subtotal=total_subtotal,
+                        tax_amount=total_tax,
+                        total_amount=total_amount,
+                        amount_paid=amount_paid,
+                        balance=balance,
+                        created_by=self.current_user['id']
+                    )
+                else:
+                    # For single product, use normal logic
+                    first_product = self.current_products[0]
+                    sale_id = self.db_manager.create_sale(
+                        client_id=current_client_id,
+                        gas_product_id=first_product['product']['id'],
+                        quantity=first_product['quantity'],
+                        unit_price=first_product['unit_price'],
+                        subtotal=total_subtotal,
+                        tax_amount=total_tax,
+                        total_amount=total_amount,
+                        amount_paid=amount_paid,
+                        balance=balance,
+                        created_by=self.current_user['id']
+                    )
                 
                 # Create receipt
                 receipt_number = self.db_manager.get_next_receipt_number()
                 self.db_manager.create_receipt(
                     receipt_number=receipt_number,
                     sale_id=sale_id,
-                    client_id=self.current_client['id'],
+                    client_id=current_client_id,
                     total_amount=total_amount,
                     amount_paid=amount_paid,
                     balance=balance,
                     created_by=self.current_user['id']
                 )
                 
+
+                
                 # Log activity
                 self.db_manager.log_activity(
                     "CREATE_SALE",
-                    f"Created sale for client: {self.current_client['name']}, Receipt: {receipt_number}",
+                    f"Created sale for client: {current_client_name}, Receipt: {receipt_number}",
                     self.current_user['id']
                 )
                 
@@ -527,7 +599,26 @@ class SalesWidget(QWidget):
                 self.clear_cart()
                 self.clear_form()
                 self.load_recent_sales()
-                self.on_client_selected()  # Refresh client info
+                
+                # Ask if user wants to create another sale for the same client
+                reply = QMessageBox.question(
+                    self,
+                    "Create Another Sale?",
+                    f"Sale completed for {current_client_name}.\n\n"
+                    "Do you want to create another sale for the same client?\n"
+                    "Click 'Yes' to keep this client, 'No' to select a different client.",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # Keep the same client and refresh their info
+                    self.on_client_selected()
+                else:
+                    # Clear client selection to force selection of new client
+                    self.client_combo.setCurrentIndex(-1)
+                    self.current_client = None
+                    self.client_info_label.setText("No client selected")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to complete sale: {str(e)}")
