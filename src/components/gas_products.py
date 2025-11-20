@@ -251,13 +251,52 @@ class GasProductsWidget(QWidget):
             actions_layout.setContentsMargins(5, 5, 5, 5)
             
             edit_btn = QPushButton("Edit")
+            edit_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #28a745;
+                    color: white;
+                    border: 1px solid #1e7e34;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    min-width: 60px;
+                }
+                QPushButton:hover {
+                    background-color: #218838;
+                    border-color: #1e7e34;
+                }
+                QPushButton:pressed {
+                    background-color: #1e7e34;
+                    border-color: #155724;
+                }
+            """)
             edit_btn.clicked.connect(lambda checked, p=product: self.edit_product(p))
             actions_layout.addWidget(edit_btn)
             
             if self.current_user['role'] == 'Admin':
                 delete_btn = QPushButton("Delete")
+                delete_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #dc3545;
+                        color: white;
+                        border: 1px solid #bd2130;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #c82333;
+                        border-color: #bd2130;
+                    }
+                    QPushButton:pressed {
+                        background-color: #bd2130;
+                        border-color: #721c24;
+                    }
+                """)
                 delete_btn.clicked.connect(lambda checked, p=product: self.delete_product(p))
-                delete_btn.setStyleSheet("background-color: #e74c3c;")
                 actions_layout.addWidget(delete_btn)
             
             self.products_table.setCellWidget(row, 6, actions_widget)

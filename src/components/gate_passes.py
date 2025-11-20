@@ -13,13 +13,14 @@ class GatePassDialog(QDialog):
         self.db_manager = db_manager
         self.current_user = current_user
         self.gate_pass_data = gate_pass_data
-        self.setWindowTitle("Create Gate Pass" if not gate_pass_data else "View Gate Pass")
+        self.setWindowTitle("Create Gate Pass" if not gate_pass_data else "Edit Gate Pass" if self.is_editable() else "View Gate Pass")
         self.setFixedSize(600, 500)
         self.init_ui()
         
         if gate_pass_data:
             self.load_gate_pass_data()
-            self.set_read_only()
+            if not self.is_editable():
+                self.set_read_only()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -209,6 +210,18 @@ class GatePassDialog(QDialog):
             else:
                 self.time_in_checkbox.setChecked(False)
     
+    def is_editable(self):
+        """Check if gate pass can be edited"""
+        if not self.gate_pass_data:
+            return True  # New gate pass is always editable
+        
+        # Can only edit if not returned and user is Admin or Gate Operator
+        if (self.gate_pass_data.get('time_in') and 
+            self.current_user['role'] not in ['Admin']):
+            return False
+        
+        return self.current_user['role'] in ['Admin', 'Gate Operator']
+    
     def set_read_only(self):
         """Set form to read-only mode for viewing"""
         self.receipt_search_input.setEnabled(False)
@@ -225,7 +238,8 @@ class GatePassDialog(QDialog):
     
     def validate(self):
         """Validate form data"""
-        if not self.current_receipt:
+        # Only validate receipt for new gate passes, not when editing
+        if not self.gate_pass_data and not self.current_receipt:
             QMessageBox.warning(self, "Validation Error", "Please select a valid receipt.")
             return False
         
@@ -244,8 +258,8 @@ class GatePassDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", "Quantity must be greater than 0.")
             return False
         
-        # Check if quantity exceeds receipt quantity
-        if quantity > self.current_receipt['quantity']:
+        # Only check receipt quantity for new gate passes
+        if not self.gate_pass_data and self.current_receipt and quantity > self.current_receipt['quantity']:
             QMessageBox.warning(
                 self,
                 "Validation Error",
@@ -261,25 +275,31 @@ class GatePassDialog(QDialog):
         if self.time_in_checkbox.isChecked():
             time_in = self.time_in_datetime.dateTime().toString("yyyy-MM-dd hh:mm:ss")
         
-        return {
-            'receipt_id': self.current_receipt['id'],
-            'client_id': self.current_receipt['client_id'],
+        # For editing, we don't need receipt data since it's already set
+        data = {
             'driver_name': self.driver_name_input.text().strip(),
             'vehicle_number': self.vehicle_number_input.text().strip(),
-            'gas_type': self.current_receipt['gas_type'],
-            'capacity': self.current_receipt['capacity'],
             'quantity': self.quantity_spinbox.value(),
             'time_out': self.time_out_datetime.dateTime().toString("yyyy-MM-dd hh:mm:ss"),
             'time_in': time_in,
             'gate_operator_id': self.current_user['id']
         }
+        
+        # Add receipt data for new gate passes
+        if self.current_receipt:
+            data['receipt_id'] = self.current_receipt['id']
+            data['client_id'] = self.current_receipt['client_id']
+            data['gas_type'] = self.current_receipt['gas_type']
+            data['capacity'] = self.current_receipt['capacity']
+        
+        return data
     
     def accept(self):
-        if self.gate_pass_data:
+        if self.gate_pass_data and not self.is_editable():
             # View mode - just close
             super().accept()
         else:
-            # Create mode - validate and create
+            # Create/Edit mode - validate and proceed
             if self.validate():
                 super().accept()
 
@@ -422,13 +442,78 @@ class GatePassesWidget(QWidget):
             actions_layout.setContentsMargins(5, 5, 5, 5)
             
             view_btn = QPushButton("View")
+            view_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #17a2b8;
+                    color: white;
+                    border: 1px solid #138496;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    min-width: 60px;
+                }
+                QPushButton:hover {
+                    background-color: #138496;
+                    border-color: #117a8b;
+                }
+                QPushButton:pressed {
+                    background-color: #117a8b;
+                    border-color: #0c5460;
+                }
+            """)
             view_btn.clicked.connect(lambda checked, gp=gate_pass: self.view_gate_pass(gp))
             actions_layout.addWidget(view_btn)
             
+            # Add edit button for Admin and Gate Operator
+            if self.current_user['role'] in ['Admin', 'Gate Operator']:
+                edit_btn = QPushButton("Edit")
+                edit_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #28a745;
+                        color: white;
+                        border: 1px solid #1e7e34;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #218838;
+                        border-color: #1e7e34;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1e7e34;
+                        border-color: #155724;
+                    }
+                """)
+                edit_btn.clicked.connect(lambda checked, gp=gate_pass: self.edit_gate_pass(gp))
+                actions_layout.addWidget(edit_btn)
+            
             if not gate_pass['time_in'] and self.current_user['role'] in ['Admin', 'Gate Operator']:
                 return_btn = QPushButton("Mark Returned")
+                return_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #27ae60;
+                        color: white;
+                        border: 1px solid #229954;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #229954;
+                        border-color: #1e8449;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1e8449;
+                        border-color: #186a3b;
+                    }
+                """)
                 return_btn.clicked.connect(lambda checked, gp=gate_pass: self.mark_returned(gp))
-                return_btn.setStyleSheet("background-color: #27ae60;")
                 actions_layout.addWidget(return_btn)
             
             self.gate_passes_table.setCellWidget(row, 9, actions_widget)
@@ -498,6 +583,39 @@ class GatePassesWidget(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to create gate pass: {str(e)}")
+    
+    def edit_gate_pass(self, gate_pass_data: dict):
+        """Edit gate pass details"""
+        dialog = GatePassDialog(self.db_manager, self.current_user, self, gate_pass_data)
+        if dialog.exec() == QDialog.Accepted:
+            try:
+                updated_data = dialog.get_gate_pass_data()
+                
+                # Update gate pass in database
+                query = '''
+                    UPDATE gate_passes 
+                    SET driver_name = ?, vehicle_number = ?, quantity = ?, time_out = ?
+                    WHERE id = ?
+                '''
+                self.db_manager.execute_update(query, (
+                    updated_data['driver_name'],
+                    updated_data['vehicle_number'],
+                    updated_data['quantity'],
+                    updated_data['time_out'],
+                    gate_pass_data['id']
+                ))
+                
+                self.db_manager.log_activity(
+                    "EDIT_GATE_PASS",
+                    f"Updated gate pass: {gate_pass_data['gate_pass_number']}",
+                    self.current_user['id']
+                )
+                
+                QMessageBox.information(self, "Success", "Gate pass updated successfully!")
+                self.load_gate_passes()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to update gate pass: {str(e)}")
     
     def view_gate_pass(self, gate_pass_data: dict):
         """View gate pass details"""

@@ -247,17 +247,76 @@ class EmployeesWidget(QWidget):
             actions_layout.setContentsMargins(5, 5, 5, 5)
             
             view_btn = QPushButton("View")
+            view_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #17a2b8;
+                    color: white;
+                    border: 1px solid #138496;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    min-width: 60px;
+                }
+                QPushButton:hover {
+                    background-color: #138496;
+                    border-color: #117a8b;
+                }
+                QPushButton:pressed {
+                    background-color: #117a8b;
+                    border-color: #0c5460;
+                }
+            """)
             view_btn.clicked.connect(lambda checked, e=employee: self.view_employee(e))
             actions_layout.addWidget(view_btn)
             
             if self.current_user['role'] in ['Admin', 'Manager']:
                 edit_btn = QPushButton("Edit")
+                edit_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #28a745;
+                        color: white;
+                        border: 1px solid #1e7e34;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #218838;
+                        border-color: #1e7e34;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1e7e34;
+                        border-color: #155724;
+                    }
+                """)
                 edit_btn.clicked.connect(lambda checked, e=employee: self.edit_employee(e))
                 actions_layout.addWidget(edit_btn)
                 
                 delete_btn = QPushButton("Delete")
+                delete_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #dc3545;
+                        color: white;
+                        border: 1px solid #bd2130;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #c82333;
+                        border-color: #bd2130;
+                    }
+                    QPushButton:pressed {
+                        background-color: #bd2130;
+                        border-color: #721c24;
+                    }
+                """)
                 delete_btn.clicked.connect(lambda checked, e=employee: self.delete_employee(e))
-                delete_btn.setStyleSheet("background-color: #e74c3c;")
                 actions_layout.addWidget(delete_btn)
             
             self.employees_table.setCellWidget(row, 6, actions_widget)

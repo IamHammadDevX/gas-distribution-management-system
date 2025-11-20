@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QPushButton, QLineEdit, QLabel, 
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QComboBox, QSpinBox, QDoubleSpinBox, QGroupBox,
-                               QTextEdit, QHeaderView, QGridLayout)
+                               QTextEdit, QHeaderView, QGridLayout, QInputDialog)
 from PySide6.QtCore import Qt, QDateTime
 from database_module import DatabaseManager
 from datetime import datetime
@@ -109,6 +109,23 @@ class SalesWidget(QWidget):
         self.balance_label = QLabel("Rs. 0.00")
         self.balance_label.setStyleSheet("font-weight: bold;")
         totals_layout.addRow("Balance:", self.balance_label)
+        
+        # Payment controls
+        payment_controls_layout = QHBoxLayout()
+        payment_controls_layout.setSpacing(5)
+        
+        self.full_payment_btn = QPushButton("Full Payment")
+        self.full_payment_btn.clicked.connect(self.set_full_payment)
+        self.full_payment_btn.setStyleSheet("background-color: #3498db; color: white; font-size: 12px;")
+        payment_controls_layout.addWidget(self.full_payment_btn)
+        
+        self.clear_payment_btn = QPushButton("Clear")
+        self.clear_payment_btn.clicked.connect(self.clear_payment)
+        self.clear_payment_btn.setStyleSheet("background-color: #95a5a6; color: white; font-size: 12px;")
+        payment_controls_layout.addWidget(self.clear_payment_btn)
+        
+        payment_controls_layout.addStretch()
+        totals_layout.addRow("", payment_controls_layout)
         
         totals_group.setLayout(totals_layout)
         left_layout.addWidget(totals_group)
@@ -300,6 +317,10 @@ class SalesWidget(QWidget):
         self.tax_label.setText(f"Rs. {tax:,.2f}")
         self.total_label.setText(f"Rs. {total:,.2f}")
         
+        # Set default payment amount to total
+        if self.amount_paid_spinbox.value() == 0:
+            self.amount_paid_spinbox.setValue(total)
+        
         self.calculate_balance()
     
     def calculate_balance(self):
@@ -406,6 +427,20 @@ class SalesWidget(QWidget):
         self.amount_paid_spinbox.setValue(0)
         self.calculate_totals()
     
+    def set_full_payment(self):
+        """Set payment amount to total amount"""
+        # Get current total from the total label
+        total_text = self.total_label.text().replace("Rs. ", "").replace(",", "")
+        try:
+            total_amount = float(total_text)
+            self.amount_paid_spinbox.setValue(total_amount)
+        except ValueError:
+            pass
+    
+    def clear_payment(self):
+        """Clear payment amount"""
+        self.amount_paid_spinbox.setValue(0)
+    
     def complete_sale(self):
         """Complete the sale"""
         if not self.current_client:
@@ -422,6 +457,12 @@ class SalesWidget(QWidget):
         total_amount = sum(item['total'] for item in self.current_products)
         amount_paid = self.amount_paid_spinbox.value()
         balance = total_amount - amount_paid
+        
+        # Validate payment amount
+        if amount_paid <= 0:
+            QMessageBox.warning(self, "Validation Error", "Please enter a valid payment amount.")
+            self.amount_paid_spinbox.setFocus()
+            return
         
         # Confirm sale
         reply = QMessageBox.question(
@@ -588,14 +629,31 @@ class SalesWidget(QWidget):
                 return
             
             # Generate new receipt
+            # Ask for payment amount
+            initial_paid = float(sale['amount_paid']) if sale['amount_paid'] is not None else 0.0
+            amount_paid, ok = QInputDialog.getDouble(
+                self,
+                "Record Payment",
+                "Enter amount paid:",
+                initial_paid,
+                0.0,
+                float(sale['total_amount']),
+                2
+            )
+            if not ok:
+                return
+            # Update sale payment before creating receipt
+            self.db_manager.update_sale_payment(sale['id'], amount_paid)
+            balance = float(sale['total_amount']) - amount_paid
+
             receipt_number = self.db_manager.get_next_receipt_number()
             receipt_id = self.db_manager.create_receipt(
                 receipt_number=receipt_number,
                 sale_id=sale['id'],
                 client_id=sale['client_id'],
                 total_amount=sale['total_amount'],
-                amount_paid=sale['amount_paid'],
-                balance=sale['balance'],
+                amount_paid=amount_paid,
+                balance=balance,
                 created_by=self.current_user['id']
             )
             
@@ -619,13 +677,14 @@ class SalesWidget(QWidget):
         """Open receipt dialog for viewing/printing"""
         try:
             # Import the receipts module
-            from receipts import ReceiptDialog
+            from components.receipts import ReceiptDialog
             
             # Get complete receipt data
             receipt_data = self.db_manager.execute_query('''
                 SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
                        gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.unit_price, 
-                       s.subtotal, s.tax_amount, s.total_amount, u.full_name as cashier_name
+                       s.subtotal, s.tax_amount, s.total_amount, u.full_name as cashier_name,
+                       r.amount_paid, r.balance
                 FROM receipts r
                 JOIN clients c ON r.client_id = c.id
                 JOIN sales s ON r.sale_id = s.id

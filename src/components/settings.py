@@ -38,12 +38,12 @@ class SettingsWidget(QWidget):
         user_layout = QFormLayout()
         user_layout.setSpacing(10)
         
-        user_layout.addRow("Username:", QLabel(self.current_user['username']))
-        user_layout.addRow("Full Name:", QLabel(self.current_user['full_name']))
-        user_layout.addRow("Role:", QLabel(self.current_user['role']))
-        user_layout.addRow("Phone:", QLabel(self.current_user['phone'] or 'N/A'))
-        user_layout.addRow("Email:", QLabel(self.current_user['email'] or 'N/A'))
-        user_layout.addRow("Last Login:", QLabel(self.current_user['last_login'] or 'Never'))
+        user_layout.addRow("Username:", QLabel(self.current_user.get('username', 'N/A')))
+        user_layout.addRow("Full Name:", QLabel(self.current_user.get('full_name', 'N/A')))
+        user_layout.addRow("Role:", QLabel(self.current_user.get('role', 'N/A')))
+        user_layout.addRow("Phone:", QLabel(self.current_user.get('phone', 'N/A')))
+        user_layout.addRow("Email:", QLabel(self.current_user.get('email', 'N/A')))
+        user_layout.addRow("Last Login:", QLabel(self.current_user.get('last_login', 'Never')))
         
         user_group.setLayout(user_layout)
         self.layout().addWidget(user_group)
@@ -154,9 +154,7 @@ class SettingsWidget(QWidget):
         self.new_phone_input.setPlaceholderText("Enter phone number")
         add_user_layout.addRow("Phone:", self.new_phone_input)
         
-        self.new_email_input = QLineEdit()
-        self.new_email_input.setPlaceholderText("Enter email address")
-        add_user_layout.addRow("Email:", self.new_email_input)
+        
         
         add_user_btn = QPushButton("Add User")
         add_user_btn.clicked.connect(self.add_user)
@@ -170,9 +168,9 @@ class SettingsWidget(QWidget):
         users_layout = QVBoxLayout()
         
         self.users_table = QTableWidget()
-        self.users_table.setColumnCount(6)
+        self.users_table.setColumnCount(5)
         self.users_table.setHorizontalHeaderLabels([
-            "ID", "Username", "Full Name", "Role", "Phone", "Status"
+            "ID", "Username", "Full Name", "Role", "Status"
         ])
         self.users_table.setAlternatingRowColors(True)
         self.users_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -331,7 +329,7 @@ class SettingsWidget(QWidget):
         full_name = self.new_full_name_input.text().strip()
         role = self.new_role_combo.currentText()
         phone = self.new_phone_input.text().strip()
-        email = self.new_email_input.text().strip()
+        email = ""  # Email field removed as requested
         
         if not username or not password or not full_name:
             QMessageBox.warning(self, "Validation Error", "Username, password, and full name are required.")
@@ -352,10 +350,10 @@ class SettingsWidget(QWidget):
             
             # Add user
             query = '''
-                INSERT INTO users (username, password_hash, role, full_name, phone, email)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (username, password_hash, role, full_name, phone)
+                VALUES (?, ?, ?, ?, ?)
             '''
-            self.db_manager.execute_update(query, (username, password_hash, role, full_name, phone, email))
+            self.db_manager.execute_update(query, (username, password_hash, role, full_name, phone))
             
             QMessageBox.information(self, "Success", "User added successfully!")
             self.load_users()
@@ -365,7 +363,6 @@ class SettingsWidget(QWidget):
             self.new_password_input.clear()
             self.new_full_name_input.clear()
             self.new_phone_input.clear()
-            self.new_email_input.clear()
             
             self.db_manager.log_activity("ADD_USER", f"Added new user: {username}", self.current_user['id'])
             
@@ -389,8 +386,7 @@ class SettingsWidget(QWidget):
                 self.users_table.setItem(row, 1, QTableWidgetItem(user['username']))
                 self.users_table.setItem(row, 2, QTableWidgetItem(user['full_name']))
                 self.users_table.setItem(row, 3, QTableWidgetItem(user['role']))
-                self.users_table.setItem(row, 4, QTableWidgetItem(user['phone'] or ''))
-                self.users_table.setItem(row, 5, QTableWidgetItem('Active' if user['is_active'] else 'Inactive'))
+                self.users_table.setItem(row, 4, QTableWidgetItem('Active' if user['is_active'] else 'Inactive'))
             
             self.users_table.resizeColumnsToContents()
             

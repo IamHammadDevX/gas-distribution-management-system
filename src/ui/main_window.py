@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar)
-from PySide6.QtCore import Qt, QTimer, QDateTime
+                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame)
+from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
 from PySide6.QtGui import QFont
 from database_module import DatabaseManager
+from datetime import datetime
 from components.clients import ClientsWidget
 from components.gas_products import GasProductsWidget
 from components.sales import SalesWidget
@@ -235,9 +236,19 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Welcome, {self.current_user['full_name']}!")
     
     def update_datetime(self):
-        """Update date/time in status bar"""
+        """Update date/time in status bar and dashboard greeting"""
         current_datetime = QDateTime.currentDateTime()
         self.datetime_label.setText(current_datetime.toString("dd-MM-yyyy hh:mm:ss"))
+        
+        # Update dashboard greeting if it exists
+        if hasattr(self, 'greeting_label') and hasattr(self, 'date_time_label'):
+            # Update greeting
+            greeting = self.get_time_based_greeting()
+            role_display = "Admin" if self.current_user['role'] == 'Admin' else self.current_user['role']
+            self.greeting_label.setText(f"{greeting}, {role_display}!")
+            
+            # Update date/time in dashboard
+            self.date_time_label.setText(current_datetime.toString("dddd, dd MMM yyyy, hh:mm AP"))
     
     def setup_navigation(self):
         """Setup navigation and create widgets based on user role"""
@@ -295,14 +306,35 @@ class MainWindow(QMainWindow):
         # Show dashboard by default
         self.switch_page("dashboard")
     
+    def get_time_based_greeting(self):
+        """Get time-based greeting"""
+        current_time = QTime.currentTime()
+        hour = current_time.hour()
+        
+        if 5 <= hour < 12:
+            return "Good morning"
+        elif 12 <= hour < 17:
+            return "Good afternoon"
+        elif 17 <= hour < 21:
+            return "Good evening"
+        else:
+            return "Good night"
+    
     def create_dashboard_widget(self):
         """Create dashboard widget"""
-        from PySide6.QtWidgets import QGridLayout, QFrame
+        from PySide6.QtWidgets import QGridLayout
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setSpacing(20)
         layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Create top bar with greeting
+        top_bar = self.create_dashboard_top_bar()
+        layout.addWidget(top_bar)
+        
+        # Store reference to the dashboard widget for updates
+        self.dashboard_widget = widget
         
         # Title
         title_label = QLabel("Dashboard")
@@ -333,10 +365,63 @@ class MainWindow(QMainWindow):
         
         return widget
     
+    def create_dashboard_top_bar(self):
+        """Create dashboard top bar with greeting and current date/time"""
+        from PySide6.QtWidgets import QHBoxLayout
+        
+        top_bar = QWidget()
+        top_bar.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border-radius: 25px;
+                padding: 15px 25px;
+                margin: 0;
+            }
+        """)
+        
+        layout = QHBoxLayout(top_bar)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(20)
+        
+        # Left side - Greeting
+        greeting = self.get_time_based_greeting()
+        role_display = "Admin" if self.current_user['role'] == 'Admin' else self.current_user['role']
+        greeting_label = QLabel(f"{greeting}, {role_display}!")
+        greeting_label.setStyleSheet("""
+            QLabel {
+                color: #007bff;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 0;
+                margin: 0;
+            }
+        """)
+        layout.addWidget(greeting_label)
+        
+        layout.addStretch()
+        
+        # Right side - Date and Time
+        current_datetime = QDateTime.currentDateTime()
+        date_time_label = QLabel(current_datetime.toString("dddd, dd MMM yyyy, hh:mm AP"))
+        date_time_label.setStyleSheet("""
+            QLabel {
+                color: #6c757d;
+                font-size: 14px;
+                font-weight: normal;
+                padding: 0;
+                margin: 0;
+            }
+        """)
+        layout.addWidget(date_time_label)
+        
+        # Store references for updating
+        self.greeting_label = greeting_label
+        self.date_time_label = date_time_label
+        
+        return top_bar
+    
     def create_stat_card(self, title: str, value: str, color: str):
         """Create a statistics card"""
-        from PySide6.QtWidgets import QFrame
-        
         card = QFrame()
         card.setFrameStyle(QFrame.Box)
         card.setStyleSheet(f"""
@@ -532,7 +617,14 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self.db_manager.log_activity("LOGOUT", f"User {self.current_user['username']} logged out")
             self.close()
-            # Restart application
-            import subprocess
-            import sys
-            subprocess.Popen([sys.executable, __file__.replace('main_window.py', 'main.py')])
+            # Show login dialog again instead of restarting
+            from components.auth import LoginDialog
+            login_dialog = LoginDialog(self.db_manager)
+            if login_dialog.exec() == LoginDialog.Accepted:
+                self.current_user = login_dialog.get_user()
+                self.update_user_info()
+                self.show()  # Show main window again
+            else:
+                # If user cancels login, exit application
+                import sys
+                sys.exit()

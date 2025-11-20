@@ -146,7 +146,7 @@ Email: info@rajputgas.com
             doc = QTextDocument()
             html_content = self.generate_receipt_html()
             doc.setHtml(html_content)
-            doc.print(printer)
+            doc.print_(printer)
     
     def export_pdf(self):
         """Export receipt as PDF"""
@@ -495,14 +495,31 @@ class ReceiptsWidget(QWidget):
             generated_count = 0
             for sale in sales_without_receipts:
                 try:
+                    from PySide6.QtWidgets import QInputDialog
+                    # Ask for amount paid for this sale
+                    initial_paid = float(sale['amount_paid']) if sale['amount_paid'] is not None else 0.0
+                    amount_paid, ok = QInputDialog.getDouble(
+                        self,
+                        "Record Payment",
+                        f"Enter amount paid for sale #{sale['id']} (client: {sale['client_name']}):",
+                        initial_paid,
+                        0.0,
+                        float(sale['total_amount']),
+                        2
+                    )
+                    if not ok:
+                        continue
+                    # Update sale payment
+                    self.db_manager.update_sale_payment(sale['id'], amount_paid)
+                    balance = float(sale['total_amount']) - amount_paid
                     receipt_number = self.db_manager.get_next_receipt_number()
                     self.db_manager.create_receipt(
                         receipt_number=receipt_number,
                         sale_id=sale['id'],
                         client_id=sale['client_id'],
                         total_amount=sale['total_amount'],
-                        amount_paid=sale['amount_paid'],
-                        balance=sale['balance'],
+                        amount_paid=amount_paid,
+                        balance=balance,
                         created_by=self.current_user['id']
                     )
                     generated_count += 1
@@ -615,7 +632,8 @@ class ReceiptsWidget(QWidget):
             query = '''
                 SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
                        u.full_name as cashier_name, gp.gas_type, gp.sub_type, gp.capacity, 
-                       s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount
+                       s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount,
+                       r.amount_paid, r.balance
                 FROM receipts r
                 JOIN clients c ON r.client_id = c.id
                 JOIN users u ON r.created_by = u.id

@@ -527,7 +527,7 @@ Clients with Outstanding Balance: {clients_with_balance}
             
             doc = QTextDocument()
             doc.setHtml(html_content)
-            doc.print(printer)
+            doc.print_(printer)
     
     def generate_print_html(self):
         """Generate HTML content for printing"""

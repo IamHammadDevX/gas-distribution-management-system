@@ -259,6 +259,14 @@ class DatabaseManager:
                                             subtotal, tax_amount, total_amount, amount_paid, balance, created_by))
         self.update_client_balance(client_id)
         return sale_id
+
+    def update_sale_payment(self, sale_id: int, amount_paid: float) -> bool:
+        query = 'UPDATE sales SET amount_paid = ?, balance = total_amount - ? WHERE id = ?'
+        updated = self.execute_update(query, (amount_paid, amount_paid, sale_id))
+        client_rows = self.execute_query('SELECT client_id FROM sales WHERE id = ?', (sale_id,))
+        if client_rows:
+            self.update_client_balance(client_rows[0]['client_id'])
+        return updated > 0
     
     def create_receipt(self, receipt_number: str, sale_id: int, client_id: int, total_amount: float,
                       amount_paid: float, balance: float, created_by: int) -> int:
