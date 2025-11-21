@@ -415,25 +415,21 @@ class ReceiptsWidget(QWidget):
         self.receipts_table.setHorizontalHeaderLabels([
             "Receipt #", "Date", "Client", "Product", "Quantity", "Total", "Paid", "Balance", "Actions"
         ])
-        
-        # Configure table
         self.receipts_table.setAlternatingRowColors(True)
         self.receipts_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.receipts_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.receipts_table.horizontalHeader().setStretchLastSection(True)
-        self.receipts_table.setColumnWidth(0, 120)  # Receipt #
-        self.receipts_table.setColumnWidth(1, 140)  # Date
-        self.receipts_table.setColumnWidth(2, 150)  # Client
-        self.receipts_table.setColumnWidth(3, 150)  # Product
-        self.receipts_table.setColumnWidth(4, 80)   # Quantity
-        self.receipts_table.setColumnWidth(5, 100)  # Total
-        self.receipts_table.setColumnWidth(6, 100)  # Paid
-        self.receipts_table.setColumnWidth(7, 100)  # Balance
-        self.receipts_table.setColumnWidth(8, 200)  # Actions
-        
+        self.receipts_table.setColumnWidth(0, 120)
+        self.receipts_table.setColumnWidth(1, 140)
+        self.receipts_table.setColumnWidth(2, 180)
+        self.receipts_table.setColumnWidth(3, 200)
+        self.receipts_table.setColumnWidth(4, 90)
+        self.receipts_table.setColumnWidth(5, 120)
+        self.receipts_table.setColumnWidth(6, 120)
+        self.receipts_table.setColumnWidth(7, 120)
+        self.receipts_table.setColumnWidth(8, 160)
         layout.addWidget(self.receipts_table)
-        
-        # Set role-based permissions
+
         self.set_role_permissions()
     
     def set_role_permissions(self):
@@ -442,6 +438,9 @@ class ReceiptsWidget(QWidget):
         
         if role == 'Driver':
             self.receipts_table.setEnabled(False)
+            self.generate_missing_btn.setEnabled(False)
+        elif role not in ['Admin', 'Accountant']:
+            self.generate_missing_btn.setEnabled(False)
     
     def load_receipts(self):
         """Load all receipts from database"""

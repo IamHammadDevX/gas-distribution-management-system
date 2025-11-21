@@ -346,26 +346,22 @@ class GatePassesWidget(QWidget):
         self.gate_passes_table.setHorizontalHeaderLabels([
             "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Gas Type", "Quantity", "Time Out", "Time In", "Actions"
         ])
-        
-        # Configure table
         self.gate_passes_table.setAlternatingRowColors(True)
         self.gate_passes_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.gate_passes_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.gate_passes_table.horizontalHeader().setStretchLastSection(True)
-        self.gate_passes_table.setColumnWidth(0, 120)  # Gate Pass #
-        self.gate_passes_table.setColumnWidth(1, 120)  # Receipt #
-        self.gate_passes_table.setColumnWidth(2, 150)  # Client
-        self.gate_passes_table.setColumnWidth(3, 120)  # Driver
-        self.gate_passes_table.setColumnWidth(4, 100)  # Vehicle
-        self.gate_passes_table.setColumnWidth(5, 120)  # Gas Type
-        self.gate_passes_table.setColumnWidth(6, 80)   # Quantity
-        self.gate_passes_table.setColumnWidth(7, 140)  # Time Out
-        self.gate_passes_table.setColumnWidth(8, 140)  # Time In
-        self.gate_passes_table.setColumnWidth(9, 200)  # Actions
-        
+        self.gate_passes_table.setColumnWidth(0, 120)
+        self.gate_passes_table.setColumnWidth(1, 120)
+        self.gate_passes_table.setColumnWidth(2, 180)
+        self.gate_passes_table.setColumnWidth(3, 140)
+        self.gate_passes_table.setColumnWidth(4, 120)
+        self.gate_passes_table.setColumnWidth(5, 160)
+        self.gate_passes_table.setColumnWidth(6, 90)
+        self.gate_passes_table.setColumnWidth(7, 140)
+        self.gate_passes_table.setColumnWidth(8, 140)
+        self.gate_passes_table.setColumnWidth(9, 180)
         layout.addWidget(self.gate_passes_table)
-        
-        # Set role-based permissions
+
         self.set_role_permissions()
     
     def set_role_permissions(self):

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame)
+                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy)
 from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QGuiApplication
 from database_module import DatabaseManager
 from datetime import datetime
 from components.clients import ClientsWidget
@@ -23,7 +23,18 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Rajput Gas Management System")
-        self.setGeometry(100, 100, 1200, 800)
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        available = screen.availableGeometry()
+        target_w = min(1200, available.width())
+        target_h = min(800, available.height())
+        self.resize(target_w, target_h)
+        fg = self.frameGeometry()
+        fg.moveCenter(available.center())
+        self.move(fg.topLeft())
+
+        safe_min_w = min(800, available.width())
+        safe_min_h = min(600, available.height())
+        self.setMinimumSize(safe_min_w, safe_min_h)
         
         # Set application style
         self.setStyleSheet("""
@@ -90,8 +101,9 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        # Create central widget and main layout
         central_widget = QWidget()
+        central_widget.setMinimumSize(0, 0)
+        central_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setCentralWidget(central_widget)
         
         main_layout = QHBoxLayout(central_widget)
@@ -193,10 +205,12 @@ class MainWindow(QMainWindow):
         user_label = QLabel(f"Welcome,\n{self.current_user['full_name']}")
         user_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 0;")
         user_layout.addWidget(user_label)
+        self.user_label = user_label
         
         role_label = QLabel(f"Role: {self.current_user['role']}")
         role_label.setStyleSheet("font-size: 12px; color: #bdc3c7; padding: 0;")
         user_layout.addWidget(role_label)
+        self.role_label = role_label
         
         logout_btn = QPushButton("Logout")
         logout_btn.clicked.connect(self.logout)
@@ -628,3 +642,28 @@ class MainWindow(QMainWindow):
                 # If user cancels login, exit application
                 import sys
                 sys.exit()
+
+    def update_user_info(self):
+        """Update UI to reflect current_user after re-login"""
+        if hasattr(self, "user_label"):
+            self.user_label.setText(f"Welcome,\n{self.current_user['full_name']}")
+        if hasattr(self, "role_label"):
+            self.role_label.setText(f"Role: {self.current_user['role']}")
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage(f"Welcome, {self.current_user['full_name']}!")
+        if hasattr(self, "greeting_label"):
+            greeting = self.get_time_based_greeting()
+            role_display = "Admin" if self.current_user['role'] == 'Admin' else self.current_user['role']
+            self.greeting_label.setText(f"{greeting}, {role_display}!")
+        self.set_role_permissions()
+        for name, widget in getattr(self, "widgets", {}).items():
+            if hasattr(widget, "current_user"):
+                widget.current_user = self.current_user
+                if hasattr(widget, "set_role_permissions"):
+                    widget.set_role_permissions()
+        current_widget = self.content_area.currentWidget() if hasattr(self, "content_area") else None
+        if current_widget:
+            for name, widget in self.widgets.items():
+                if widget is current_widget:
+                    self.refresh_current_page(name)
+                    break
