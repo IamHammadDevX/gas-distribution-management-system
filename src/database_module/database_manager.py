@@ -104,27 +104,6 @@ class DatabaseManager:
                 )
             ''')
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS cylinder_movements (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER NOT NULL,
-                    gas_product_id INTEGER NOT NULL,
-                    sale_id INTEGER,
-                    receipt_id INTEGER,
-                    gate_pass_id INTEGER,
-                    movement_type TEXT NOT NULL CHECK(movement_type IN ('DELIVERY', 'RETURN')),
-                    quantity INTEGER NOT NULL,
-                    operator_id INTEGER,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    notes TEXT,
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (gas_product_id) REFERENCES gas_products (id),
-                    FOREIGN KEY (sale_id) REFERENCES sales (id),
-                    FOREIGN KEY (receipt_id) REFERENCES receipts (id),
-                    FOREIGN KEY (gate_pass_id) REFERENCES gate_passes (id),
-                    FOREIGN KEY (operator_id) REFERENCES users (id)
-                )
-            ''')
-            cursor.execute('''
                 CREATE TABLE IF NOT EXISTS gate_passes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     gate_pass_number TEXT UNIQUE NOT NULL,
@@ -136,9 +115,8 @@ class DatabaseManager:
                     capacity TEXT NOT NULL,
                     quantity INTEGER NOT NULL,
                     time_out TIMESTAMP,
+                    expected_time_in TIMESTAMP,
                     time_in TIMESTAMP,
-                    fuel_cost DECIMAL(10,2) DEFAULT 0,
-                    other_charges DECIMAL(10,2) DEFAULT 0,
                     gate_operator_id INTEGER NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (receipt_id) REFERENCES receipts (id),
@@ -146,12 +124,23 @@ class DatabaseManager:
                     FOREIGN KEY (gate_operator_id) REFERENCES users (id)
                 )
             ''')
-            cursor.execute("PRAGMA table_info('gate_passes')")
-            cols = [row[1] for row in cursor.fetchall()]
-            if 'fuel_cost' not in cols:
-                cursor.execute("ALTER TABLE gate_passes ADD COLUMN fuel_cost DECIMAL(10,2) DEFAULT 0")
-            if 'other_charges' not in cols:
-                cursor.execute("ALTER TABLE gate_passes ADD COLUMN other_charges DECIMAL(10,2) DEFAULT 0")
+            try:
+                cursor.execute('ALTER TABLE gate_passes ADD COLUMN expected_time_in TIMESTAMP')
+            except Exception:
+                pass
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cylinder_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    gate_pass_id INTEGER,
+                    client_id INTEGER NOT NULL,
+                    gas_type TEXT NOT NULL,
+                    capacity TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    returned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (gate_pass_id) REFERENCES gate_passes (id),
+                    FOREIGN KEY (client_id) REFERENCES clients (id)
+                )
+            ''')
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS employees (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +151,20 @@ class DatabaseManager:
                     joining_date DATE NOT NULL,
                     is_active BOOLEAN DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vehicle_expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    driver_id INTEGER,
+                    driver_name TEXT,
+                    vehicle_number TEXT,
+                    expense_type TEXT NOT NULL,
+                    amount DECIMAL(10,2) NOT NULL,
+                    notes TEXT,
+                    expense_date DATE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (driver_id) REFERENCES employees (id)
                 )
             ''')
             cursor.execute('''
@@ -185,11 +188,7 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items (sale_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items (gas_product_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cyl_mov_client_product ON cylinder_movements (client_id, gas_product_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cyl_mov_type ON cylinder_movements (movement_type)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)')
             cursor.execute('SELECT COUNT(*) FROM users WHERE role = "Admin"')
@@ -316,16 +315,6 @@ class DatabaseManager:
         '''
         return self.execute_update(query, (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount))
 
-    def get_sale_items(self, sale_id: int) -> List[Dict]:
-        query = '''
-            SELECT si.*, gp.gas_type, gp.sub_type, gp.capacity
-            FROM sale_items si
-            JOIN gas_products gp ON si.gas_product_id = gp.id
-            WHERE si.sale_id = ?
-            ORDER BY si.id ASC
-        '''
-        return self.execute_query(query, (sale_id,))
-
     def update_sale_payment(self, sale_id: int, amount_paid: float) -> bool:
         query = 'UPDATE sales SET amount_paid = ?, balance = total_amount - ? WHERE id = ?'
         updated = self.execute_update(query, (amount_paid, amount_paid, sale_id))
@@ -347,63 +336,167 @@ class DatabaseManager:
         result = self.execute_query(query)
         count = result[0]['COUNT(*) + 1'] if result else 1
         return f"RCP-{datetime.now().year}-{str(count).zfill(6)}"
+
+    def get_sale_items(self, sale_id: int) -> List[Dict]:
+        items = self.execute_query('''
+            SELECT si.created_at, si.quantity, si.unit_price, si.total_amount, si.subtotal, si.tax_amount,
+                   gp.gas_type, gp.sub_type, gp.capacity
+            FROM sale_items si
+            JOIN gas_products gp ON si.gas_product_id = gp.id
+            WHERE si.sale_id = ?
+            ORDER BY si.id
+        ''', (sale_id,))
+        if items:
+            return items
+        # Fallback to single-line sale if no sale_items exist
+        return self.execute_query('''
+            SELECT s.created_at, s.quantity, s.unit_price, s.total_amount, s.subtotal, s.tax_amount,
+                   gp.gas_type, gp.sub_type, gp.capacity
+            FROM sales s
+            JOIN gas_products gp ON s.gas_product_id = gp.id
+            WHERE s.id = ?
+        ''', (sale_id,))
     
     def get_next_gate_pass_number(self) -> str:
         query = 'SELECT COUNT(*) + 1 FROM gate_passes'
         result = self.execute_query(query)
         count = result[0]['COUNT(*) + 1'] if result else 1
         return f"GP-{datetime.now().year}-{str(count).zfill(6)}"
-
-    def add_cylinder_movement(self, client_id: int, gas_product_id: int, movement_type: str,
-                               quantity: int, operator_id: Optional[int] = None,
-                               sale_id: Optional[int] = None, receipt_id: Optional[int] = None,
-                               gate_pass_id: Optional[int] = None, notes: str = "") -> int:
-        query = '''
-            INSERT INTO cylinder_movements (client_id, gas_product_id, movement_type, quantity, operator_id, sale_id, receipt_id, gate_pass_id, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        '''
-        return self.execute_update(query, (client_id, gas_product_id, movement_type, quantity, operator_id, sale_id, receipt_id, gate_pass_id, notes))
-
-    def get_client_cylinder_balance(self, client_id: int) -> List[Dict]:
-        query = '''
-            SELECT gp.id as gas_product_id, gp.gas_type, gp.sub_type, gp.capacity,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'DELIVERY' THEN cm.quantity ELSE 0 END), 0) AS delivered,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'RETURN' THEN cm.quantity ELSE 0 END), 0) AS returned,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'DELIVERY' THEN cm.quantity ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN cm.movement_type = 'RETURN' THEN cm.quantity ELSE 0 END), 0) AS outstanding
-        FROM cylinder_movements cm
-        JOIN gas_products gp ON cm.gas_product_id = gp.id
-        WHERE cm.client_id = ?
-        GROUP BY gp.id, gp.gas_type, gp.sub_type, gp.capacity
-        ORDER BY gp.gas_type, gp.sub_type, gp.capacity
-        '''
-        return self.execute_query(query, (client_id,))
-
-    def get_clients_cylinder_summary(self) -> List[Dict]:
-        query = '''
-            SELECT c.id AS client_id, c.name AS client_name,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'DELIVERY' THEN cm.quantity ELSE 0 END), 0) AS delivered,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'RETURN' THEN cm.quantity ELSE 0 END), 0) AS returned,
-                   COALESCE(SUM(CASE WHEN cm.movement_type = 'DELIVERY' THEN cm.quantity ELSE 0 END), 0)
-                     - COALESCE(SUM(CASE WHEN cm.movement_type = 'RETURN' THEN cm.quantity ELSE 0 END), 0) AS outstanding
-            FROM clients c
-            LEFT JOIN cylinder_movements cm ON cm.client_id = c.id
-            GROUP BY c.id, c.name
-            ORDER BY outstanding DESC, c.name
-        '''
-        return self.execute_query(query)
     
     def create_gate_pass(self, gate_pass_number: str, receipt_id: int, client_id: int, driver_name: str,
-                        vehicle_number: str, gas_type: str, capacity: str, quantity: int,
-                        gate_operator_id: int, fuel_cost: float = 0.0, other_charges: float = 0.0) -> int:
+                        vehicle_number: str, gas_type: str, capacity: str, quantity: int, gate_operator_id: int, expected_time_in: Optional[str] = None) -> int:
         query = '''
-            INSERT INTO gate_passes (gate_pass_number, receipt_id, client_id, driver_name,
-                                   vehicle_number, gas_type, capacity, quantity, time_out,
-                                   fuel_cost, other_charges, gate_operator_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+            INSERT INTO gate_passes (gate_pass_number, receipt_id, client_id, driver_name, 
+                                   vehicle_number, gas_type, capacity, quantity, gate_operator_id, time_out, expected_time_in)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         '''
         return self.execute_update(query, (gate_pass_number, receipt_id, client_id, driver_name,
-                                          vehicle_number, gas_type, capacity, quantity,
-                                          fuel_cost, other_charges, gate_operator_id))
+                                          vehicle_number, gas_type, capacity, quantity, gate_operator_id, expected_time_in))
+
+    def add_cylinder_return(self, client_id: int, gas_type: str, capacity: str, quantity: int, gate_pass_id: Optional[int] = None) -> int:
+        query = '''
+            INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity)
+            VALUES (?, ?, ?, ?, ?)
+        '''
+        return self.execute_update(query, (gate_pass_id, client_id, gas_type, capacity, quantity))
+
+    def get_cylinder_summary_for_client(self, client_id: int):
+        deliveries = self.execute_query('''
+            SELECT gp.gas_type, gp.capacity, COALESCE(SUM(gp.quantity),0) as delivered,
+                   COALESCE(prod.sub_type, '') as sub_type
+            FROM gate_passes gp
+            LEFT JOIN receipts r ON gp.receipt_id = r.id
+            LEFT JOIN sales s ON r.sale_id = s.id
+            LEFT JOIN gas_products prod ON s.gas_product_id = prod.id
+            WHERE gp.client_id = ?
+            GROUP BY gp.gas_type, prod.sub_type, gp.capacity
+        ''', (client_id,))
+        returns = self.execute_query('''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gas_type, capacity
+        ''', (client_id,))
+        rmap = {(r['gas_type'], r['capacity']): r['returned'] for r in returns}
+        summary = []
+        for d in deliveries:
+            key = (d['gas_type'], d['capacity'])
+            ret = rmap.get(key, 0)
+            summary.append({
+                'gas_type': d['gas_type'],
+                'sub_type': d.get('sub_type') or '',
+                'capacity': d['capacity'],
+                'delivered': d['delivered'],
+                'returned': ret,
+                'remaining': int(d['delivered']) - int(ret)
+            })
+        return summary
+
+    def add_vehicle_expense(self, driver_id: Optional[int], driver_name: str, vehicle_number: str, expense_type: str, amount: float, notes: str, expense_date):
+        query = '''
+            INSERT INTO vehicle_expenses (driver_id, driver_name, vehicle_number, expense_type, amount, notes, expense_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        '''
+        return self.execute_update(query, (driver_id, driver_name, vehicle_number, expense_type, amount, notes, expense_date))
+
+    def get_vehicle_expenses_by_date(self, day) -> list:
+        query = '''
+            SELECT * FROM vehicle_expenses WHERE expense_date = ? ORDER BY created_at DESC
+        '''
+        return self.execute_query(query, (day,))
+
+    def get_client_deliveries_with_returns(self, client_id: int) -> List[Dict]:
+        deliveries = self.execute_query('''
+            SELECT gp.id as gate_pass_id, gp.gate_pass_number, gp.gas_type, gp.capacity,
+                   gp.quantity as delivered, gp.time_out, gp.time_in,
+                   COALESCE(prod.sub_type,'') as sub_type
+            FROM gate_passes gp
+            LEFT JOIN receipts r ON gp.receipt_id = r.id
+            LEFT JOIN sales s ON r.sale_id = s.id
+            LEFT JOIN gas_products prod ON s.gas_product_id = prod.id
+            WHERE gp.client_id = ?
+            ORDER BY gp.created_at DESC
+        ''', (client_id,))
+        returns = self.execute_query('''
+            SELECT gate_pass_id, gas_type, capacity, COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gate_pass_id, gas_type, capacity
+        ''', (client_id,))
+        rmap = {}
+        for r in returns:
+            key = (r.get('gate_pass_id'), r['gas_type'], r['capacity'])
+            rmap[key] = r['returned']
+        out = []
+        for d in deliveries:
+            key = (d['gate_pass_id'] if 'gate_pass_id' in d else d['gate_pass_id'], d['gas_type'], d['capacity'])
+            ret = rmap.get(key, 0)
+            out.append({
+                'gate_pass_id': d['gate_pass_id'],
+                'gate_pass_number': d['gate_pass_number'],
+                'gas_type': d['gas_type'],
+                'sub_type': d.get('sub_type') or '',
+                'capacity': d['capacity'],
+                'delivered': d['delivered'],
+                'returned': int(ret),
+                'remaining': int(d['delivered']) - int(ret),
+                'time_out': d['time_out'],
+                'time_in': d['time_in']
+            })
+        return out
+
+    def auto_mark_due_returns(self) -> int:
+        count = 0
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, client_id, gas_type, capacity, quantity
+                FROM gate_passes
+                WHERE expected_time_in IS NOT NULL AND time_in IS NULL AND expected_time_in <= CURRENT_TIMESTAMP
+            ''')
+            due = [dict(r) for r in cursor.fetchall()]
+            for gp in due:
+                cursor.execute('SELECT COALESCE(SUM(quantity),0) as returned FROM cylinder_returns WHERE gate_pass_id = ?', (gp['id'],))
+                returned = cursor.fetchone()['returned']
+                remaining = int(gp['quantity']) - int(returned)
+                if remaining > 0:
+                    cursor.execute('''
+                        INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity, returned_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (gp['id'], gp['client_id'], gp['gas_type'], gp['capacity'], remaining))
+                cursor.execute('UPDATE gate_passes SET time_in = CURRENT_TIMESTAMP WHERE id = ?', (gp['id'],))
+                count += 1
+            conn.commit()
+        return count
+
+    def find_latest_gate_pass_for_product(self, client_id: int, gas_type: str, capacity: str) -> Optional[int]:
+        rows = self.execute_query('''
+            SELECT id FROM gate_passes 
+            WHERE client_id = ? AND gas_type = ? AND capacity = ?
+            ORDER BY created_at DESC LIMIT 1
+        ''', (client_id, gas_type, capacity))
+        return rows[0]['id'] if rows else None
     
     def get_employees(self) -> List[Dict]:
         query = 'SELECT * FROM employees WHERE is_active = 1 ORDER BY name'

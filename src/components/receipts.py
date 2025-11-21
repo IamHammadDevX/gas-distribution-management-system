@@ -433,10 +433,13 @@ class ReceiptsWidget(QWidget):
             self.receipts_table.setItem(row, 2, QTableWidgetItem(client_text))
             
             # Product
-            product_text = f"{receipt['gas_type']}"
-            if receipt['sub_type']:
-                product_text += f" - {receipt['sub_type']}"
-            product_text += f" - {receipt['capacity']}"
+            product_text = receipt.get('product_summary') or ''
+            if not product_text:
+                product_text = f"{receipt.get('gas_type','')}"
+                if receipt.get('sub_type'):
+                    product_text += f" - {receipt['sub_type']}"
+                if receipt.get('capacity'):
+                    product_text += f" - {receipt['capacity']}"
             self.receipts_table.setItem(row, 3, QTableWidgetItem(product_text))
             
             # Quantity

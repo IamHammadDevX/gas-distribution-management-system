@@ -351,40 +351,24 @@ class SalesWidget(QWidget):
             try:
                 current_client_id = self.current_client['id']
                 current_client_name = self.current_client['name']
-                if len(self.current_products) > 1:
-                    first_product = self.current_products[0]
-                    total_quantity = sum(item['quantity'] for item in self.current_products)
-                    sale_id = self.db_manager.create_sale(
-                        client_id=current_client_id,
-                        gas_product_id=first_product['product']['id'],
-                        quantity=total_quantity,
-                        unit_price=total_subtotal / total_quantity if total_quantity > 0 else 0,
-                        subtotal=total_subtotal,
-                        tax_amount=total_tax,
-                        total_amount=total_amount,
-                        amount_paid=amount_paid,
-                        balance=balance,
-                        created_by=self.current_user['id']
-                    )
-                else:
-                    first_product = self.current_products[0]
-                    sale_id = self.db_manager.create_sale(
-                        client_id=current_client_id,
-                        gas_product_id=first_product['product']['id'],
-                        quantity=first_product['quantity'],
-                        unit_price=first_product['unit_price'],
-                        subtotal=total_subtotal,
-                        tax_amount=total_tax,
-                        total_amount=total_amount,
-                        amount_paid=amount_paid,
-                        balance=balance,
-                        created_by=self.current_user['id']
-                    )
+                # Create a sale header referencing the first product but store all items in sale_items
+                first_product = self.current_products[0]
+                sale_id = self.db_manager.create_sale(
+                    client_id=current_client_id,
+                    gas_product_id=first_product['product']['id'],
+                    quantity=first_product['quantity'],
+                    unit_price=first_product['unit_price'],
+                    subtotal=total_subtotal,
+                    tax_amount=total_tax,
+                    total_amount=total_amount,
+                    amount_paid=amount_paid,
+                    balance=balance,
+                    created_by=self.current_user['id']
+                )
                 for item in self.current_products:
-                    p = item['product']
                     self.db_manager.add_sale_item(
                         sale_id=sale_id,
-                        gas_product_id=p['id'],
+                        gas_product_id=item['product']['id'],
                         quantity=item['quantity'],
                         unit_price=item['unit_price'],
                         subtotal=item['subtotal'],
@@ -401,16 +385,6 @@ class SalesWidget(QWidget):
                     balance=balance,
                     created_by=self.current_user['id']
                 )
-                for item in self.current_products:
-                    p = item['product']
-                    self.db_manager.add_cylinder_movement(
-                        client_id=current_client_id,
-                        gas_product_id=p['id'],
-                        movement_type='DELIVERY',
-                        quantity=item['quantity'],
-                        operator_id=self.current_user['id'],
-                        sale_id=sale_id
-                    )
                 self.db_manager.log_activity(
                     "CREATE_SALE",
                     f"Created sale for client: {current_client_name}, Receipt: {receipt_number}",
