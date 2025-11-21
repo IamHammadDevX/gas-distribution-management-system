@@ -257,6 +257,7 @@ Number of Clients with Outstanding Balance: {len(clients)}
         # Calculate summary
         total_out = len([gp for gp in gate_passes if gp['time_out']])
         total_in = len([gp for gp in gate_passes if gp['time_in']])
+        total_charges = sum((float(gp.get('fuel_cost') or 0) + float(gp.get('other_charges') or 0)) for gp in gate_passes)
         
         # Generate summary
         summary = f"""
@@ -266,13 +267,14 @@ Total Gate Passes Created: {len(gate_passes)}
 Total Cylinders Out: {total_out}
 Total Cylinders In: {total_in}
 Pending Return: {total_out - total_in}
+Total Vehicle Charges: Rs. {total_charges:,.2f}
         """
         self.summary_text.setPlainText(summary.strip())
         
         # Populate table
-        self.report_table.setColumnCount(7)
+        self.report_table.setColumnCount(8)
         self.report_table.setHorizontalHeaderLabels([
-            "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Time Out", "Time In"
+            "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Time Out", "Time In", "Charges"
         ])
         
         self.report_table.setRowCount(len(gate_passes))
@@ -292,6 +294,10 @@ Pending Return: {total_out - total_in}
             if not gate_pass['time_in']:
                 time_in_item.setForeground(Qt.red)
             self.report_table.setItem(row, 6, time_in_item)
+            charges = float(gate_pass.get('fuel_cost') or 0) + float(gate_pass.get('other_charges') or 0)
+            charges_item = QTableWidgetItem(f"Rs. {charges:,.2f}")
+            charges_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.report_table.setItem(row, 7, charges_item)
         
         self.report_table.resizeColumnsToContents()
     

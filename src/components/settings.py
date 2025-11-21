@@ -89,9 +89,9 @@ class SettingsWidget(QWidget):
         company_layout = QFormLayout()
         company_layout.setSpacing(10)
         
-        self.company_name_input = QLineEdit("Rajput Gas Ltd.")
-        self.company_address_input = QLineEdit("Industrial Area, Phase 2")
-        self.company_phone_input = QLineEdit("+92-42-1234567")
+        self.company_name_input = QLineEdit("Rajput Gas Traders")
+        self.company_address_input = QLineEdit("Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala")
+        self.company_phone_input = QLineEdit("0301-6465144")
         self.company_email_input = QLineEdit("info@rajputgas.com")
         
         company_layout.addRow("Company Name:", self.company_name_input)

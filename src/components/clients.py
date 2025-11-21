@@ -414,6 +414,25 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
             QMessageBox.warning(self, "Database Error", f"Failed to load purchase history: {str(e)}")
         
         layout.addWidget(purchases_table)
+
+        layout.addWidget(QLabel("<b>Outstanding Cylinders:</b>"))
+        balance_table = QTableWidget()
+        balance_table.setColumnCount(4)
+        balance_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Outstanding"])
+        balance_table.setAlternatingRowColors(True)
+        balance_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(balance_table)
+        try:
+            balances = self.db_manager.get_client_cylinder_balance(client['id'])
+            balance_table.setRowCount(len(balances))
+            for row_b, item in enumerate(balances):
+                balance_table.setItem(row_b, 0, QTableWidgetItem(item['gas_type']))
+                balance_table.setItem(row_b, 1, QTableWidgetItem(item['sub_type'] or ''))
+                balance_table.setItem(row_b, 2, QTableWidgetItem(item['capacity']))
+                balance_table.setItem(row_b, 3, QTableWidgetItem(str(item['outstanding'])))
+            balance_table.resizeColumnsToContents()
+        except Exception as e:
+            QMessageBox.warning(self, "Database Error", f"Failed to load cylinder balances: {str(e)}")
         
         # Close button
         close_btn = QPushButton("Close")

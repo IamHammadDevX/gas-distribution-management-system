@@ -8,7 +8,7 @@ from components.clients import ClientsWidget
 from components.gas_products import GasProductsWidget
 from components.sales import SalesWidget
 from components.receipts import ReceiptsWidget
-from components.gate_passes import GatePassesWidget
+from components.gate_passes import GatePassesWidget, CylinderReturnsWidget
 from components.employees import EmployeesWidget
 from components.reports import ReportsWidget
 from components.settings import SettingsWidget
@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
             ("Sales", "sales"),
             ("Receipts", "receipts"),
             ("Gate Passes", "gate_passes"),
+            ("Cylinder Returns", "cylinder_returns"),
             ("Employees", "employees"),
             ("Reports", "reports"),
             ("Settings", "settings")
@@ -298,6 +299,9 @@ class MainWindow(QMainWindow):
         gate_passes_widget = GatePassesWidget(self.db_manager, self.current_user)
         self.widgets["gate_passes"] = gate_passes_widget
         self.content_area.addWidget(gate_passes_widget)
+        cylinder_returns_widget = CylinderReturnsWidget(self.db_manager, self.current_user)
+        self.widgets["cylinder_returns"] = cylinder_returns_widget
+        self.content_area.addWidget(cylinder_returns_widget)
         
         # Employees widget
         employees_widget = EmployeesWidget(self.db_manager, self.current_user)
@@ -336,52 +340,101 @@ class MainWindow(QMainWindow):
     
     def create_dashboard_widget(self):
         """Create dashboard widget"""
-        from PySide6.QtWidgets import QGridLayout
+        from PySide6.QtWidgets import QGridLayout, QStackedWidget
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setSpacing(20)
         layout.setContentsMargins(30, 30, 30, 30)
         
-        # Create top bar with greeting
         top_bar = self.create_dashboard_top_bar()
         layout.addWidget(top_bar)
         
-        # Store reference to the dashboard widget for updates
         self.dashboard_widget = widget
         
-        # Title
+        self.dashboard_stack = QStackedWidget()
+        
+        full_page = QWidget()
+        full_layout = QVBoxLayout(full_page)
+        full_layout.setSpacing(20)
+        
         title_label = QLabel("Dashboard")
         title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(title_label)
+        full_layout.addWidget(title_label)
         
-        # Statistics cards
         stats_layout = QGridLayout()
         stats_layout.setSpacing(20)
         
-        # Get dashboard statistics
         stats = self.get_dashboard_stats()
-        
-        # Create stat cards
         stat_cards = [
             ("Total Clients", str(stats['total_clients']), "#3498db"),
             ("Total Sales", f"Rs. {stats['total_sales']:,.2f}", "#2ecc71"),
             ("Outstanding Balance", f"Rs. {stats['outstanding_balance']:,.2f}", "#e74c3c"),
             ("Today's Sales", f"Rs. {stats['today_sales']:,.2f}", "#f39c12")
         ]
-        
         for i, (title, value, color) in enumerate(stat_cards):
             card = self.create_stat_card(title, value, color)
             stats_layout.addWidget(card, i // 2, i % 2)
+        full_layout.addLayout(stats_layout)
+        full_layout.addStretch()
         
-        layout.addLayout(stats_layout)
-        layout.addStretch()
+        company_page = QWidget()
+        company_layout = QVBoxLayout(company_page)
+        company_layout.setSpacing(20)
+        
+        company_title = QLabel("Company Information")
+        company_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        company_layout.addWidget(company_title)
+        
+        from PySide6.QtWidgets import QGridLayout
+        info_card = QFrame()
+        info_card.setStyleSheet("QFrame { background-color: white; border: 2px solid #3498db; border-radius: 8px; padding: 20px; }")
+        info_layout = QGridLayout(info_card)
+        info_layout.setHorizontalSpacing(20)
+        info_layout.setVerticalSpacing(10)
+        
+        label_style = "color: #7f8c8d; font-size: 13px;"
+        value_style = "color: #2c3e50; font-size: 16px; font-weight: bold;"
+        
+        name_label = QLabel("Company Name:")
+        name_label.setStyleSheet(label_style)
+        self.company_name_value = QLabel("")
+        self.company_name_value.setStyleSheet(value_style)
+        info_layout.addWidget(name_label, 0, 0)
+        info_layout.addWidget(self.company_name_value, 0, 1)
+        
+        proprietor_label = QLabel("Proprietor:")
+        proprietor_label.setStyleSheet(label_style)
+        self.company_proprietor_value = QLabel("")
+        self.company_proprietor_value.setStyleSheet(value_style)
+        info_layout.addWidget(proprietor_label, 1, 0)
+        info_layout.addWidget(self.company_proprietor_value, 1, 1)
+        
+        company_layout.addWidget(info_card)
+        
+        description_card = QFrame()
+        description_card.setStyleSheet("QFrame { background-color: white; border: 2px solid #2ecc71; border-radius: 8px; padding: 20px; }")
+        description_layout = QVBoxLayout(description_card)
+        description_title = QLabel("Description")
+        description_title.setStyleSheet("color: #2ecc71; font-size: 14px; font-weight: bold;")
+        self.company_description_value = QLabel("")
+        self.company_description_value.setStyleSheet("color: #2c3e50; font-size: 14px;")
+        self.company_description_value.setWordWrap(True)
+        description_layout.addWidget(description_title)
+        description_layout.addWidget(self.company_description_value)
+        company_layout.addWidget(description_card)
+        
+        self.dashboard_stack.addWidget(full_page)
+        self.dashboard_stack.addWidget(company_page)
+        layout.addWidget(self.dashboard_stack)
+        
+        self.refresh_company_page()
         
         return widget
     
     def create_dashboard_top_bar(self):
         """Create dashboard top bar with greeting and current date/time"""
-        from PySide6.QtWidgets import QHBoxLayout
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
         
         top_bar = QWidget()
         top_bar.setStyleSheet("""
@@ -427,6 +480,23 @@ class MainWindow(QMainWindow):
             }
         """)
         layout.addWidget(date_time_label)
+        
+        if self.current_user['role'] == 'Admin':
+            toggle_btn = QPushButton("Toggle View")
+            toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6c757d;
+                    color: white;
+                    padding: 8px 16px;
+                    border-radius: 18px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #5a6268; }
+                QPushButton:pressed { background-color: #545b62; }
+            """)
+            toggle_btn.clicked.connect(self.toggle_dashboard_view)
+            layout.addWidget(toggle_btn)
+            self.dashboard_toggle_btn = toggle_btn
         
         # Store references for updating
         self.greeting_label = greeting_label
@@ -499,13 +569,13 @@ class MainWindow(QMainWindow):
     def refresh_dashboard(self):
         """Refresh dashboard statistics"""
         try:
-            stats = self.get_dashboard_stats()
-            
-            # Update the dashboard widget if it exists
-            if 'dashboard' in self.widgets:
-                dashboard_widget = self.widgets['dashboard']
-                self.update_dashboard_stats(dashboard_widget, stats)
-                
+            if hasattr(self, 'dashboard_stack') and self.dashboard_stack.currentIndex() == 0:
+                stats = self.get_dashboard_stats()
+                if 'dashboard' in self.widgets:
+                    dashboard_widget = self.widgets['dashboard']
+                    self.update_dashboard_stats(dashboard_widget, stats)
+            else:
+                self.refresh_company_page()
         except Exception as e:
             print(f"Error refreshing dashboard: {str(e)}")
     
@@ -536,6 +606,33 @@ class MainWindow(QMainWindow):
                         
         except Exception as e:
             print(f"Error updating dashboard stats: {str(e)}")
+
+    def get_company_info(self) -> dict:
+        return {
+            'company_name': 'Rajput Gas Ltd.',
+            'proprietor': 'Saleem Ahmad',
+            'description': 'Rajput Gas Ltd. supplies industrial and medical gases with a focus on safety, reliability, and timely delivery. We manage cylinder logistics, gate pass operations, and customer billing with robust controls.'
+        }
+
+    def refresh_company_page(self):
+        try:
+            info = self.get_company_info()
+            self.company_name_value.setText(info['company_name'])
+            self.company_proprietor_value.setText(info['proprietor'])
+            self.company_description_value.setText(info['description'])
+        except Exception as e:
+            print(f"Error refreshing company page: {str(e)}")
+
+    def toggle_dashboard_view(self):
+        try:
+            if hasattr(self, 'dashboard_stack'):
+                idx = self.dashboard_stack.currentIndex()
+                self.dashboard_stack.setCurrentIndex(1 if idx == 0 else 0)
+                if hasattr(self, 'dashboard_toggle_btn'):
+                    self.dashboard_toggle_btn.setText("Show Dashboard" if idx == 0 else "Toggle View")
+                self.refresh_dashboard()
+        except Exception as e:
+            print(f"Error toggling dashboard: {str(e)}")
     
     def set_role_permissions(self):
         """Set permissions based on user role"""
@@ -545,11 +642,11 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'gate_passes', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'gate_passes', 'cylinder_returns', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
             enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'reports']
         elif role == 'Gate Operator':
-            enabled_modules = ['dashboard', 'gate_passes']
+            enabled_modules = ['dashboard', 'gate_passes', 'cylinder_returns']
         elif role == 'Driver':
             enabled_modules = ['dashboard']
         
@@ -578,6 +675,7 @@ class MainWindow(QMainWindow):
                 "sales": "Sales & Billing",
                 "receipts": "Receipts",
                 "gate_passes": "Gate Passes",
+                "cylinder_returns": "Cylinder Returns",
                 "employees": "Employee Management",
                 "reports": "Reports",
                 "settings": "Settings"
@@ -589,6 +687,9 @@ class MainWindow(QMainWindow):
         try:
             if page_name == "dashboard":
                 self.refresh_dashboard()
+            elif page_name == "cylinder_returns":
+                if hasattr(self.widgets['cylinder_returns'], 'load_summary'):
+                    self.widgets['cylinder_returns'].load_summary()
             elif page_name == "clients":
                 if hasattr(self.widgets['clients'], 'load_clients'):
                     self.widgets['clients'].load_clients()

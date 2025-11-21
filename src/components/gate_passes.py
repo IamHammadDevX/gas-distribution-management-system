@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QPushButton, QLineEdit, QLabel, 
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QComboBox, QSpinBox, QGroupBox, QTextEdit, QHeaderView,
-                               QDateTimeEdit, QCheckBox)
+                               QDateTimeEdit, QCheckBox, QDoubleSpinBox, QScrollArea, QSizePolicy)
 from PySide6.QtCore import Qt, QDateTime
 from database_module import DatabaseManager
 from datetime import datetime
@@ -14,7 +14,8 @@ class GatePassDialog(QDialog):
         self.current_user = current_user
         self.gate_pass_data = gate_pass_data
         self.setWindowTitle("Create Gate Pass" if not gate_pass_data else "Edit Gate Pass" if self.is_editable() else "View Gate Pass")
-        self.setFixedSize(600, 500)
+        self.resize(900, 700)
+        self.setMinimumSize(700, 560)
         self.init_ui()
         
         if gate_pass_data:
@@ -26,14 +27,19 @@ class GatePassDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Title
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
         title_label = QLabel("Gate Pass")
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(title_label)
-        
-        # Form layout
+        content_layout.addWidget(title_label)
+
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
         
@@ -59,16 +65,19 @@ class GatePassDialog(QDialog):
         
         # Driver name
         self.driver_name_input = QLineEdit()
+        self.driver_name_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.driver_name_input.setPlaceholderText("Enter driver name")
         form_layout.addRow("Driver Name *:", self.driver_name_input)
         
         # Vehicle number
         self.vehicle_number_input = QLineEdit()
+        self.vehicle_number_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.vehicle_number_input.setPlaceholderText("Enter vehicle number (e.g., ABC-123)")
         form_layout.addRow("Vehicle Number *:", self.vehicle_number_input)
         
         # Gas type and capacity (auto-filled from receipt)
         self.gas_info_label = QLabel("Gas information will appear here")
+        self.gas_info_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.gas_info_label.setStyleSheet("color: #666; font-style: italic;")
         form_layout.addRow("Gas Info:", self.gas_info_label)
         
@@ -77,6 +86,18 @@ class GatePassDialog(QDialog):
         self.quantity_spinbox.setRange(1, 100)
         self.quantity_spinbox.setValue(1)
         form_layout.addRow("Quantity *:", self.quantity_spinbox)
+
+        self.fuel_cost_spin = QDoubleSpinBox()
+        self.fuel_cost_spin.setRange(0, 100000000)
+        self.fuel_cost_spin.setDecimals(2)
+        self.fuel_cost_spin.setPrefix("Rs. ")
+        form_layout.addRow("Fuel Cost:", self.fuel_cost_spin)
+
+        self.other_charges_spin = QDoubleSpinBox()
+        self.other_charges_spin.setRange(0, 100000000)
+        self.other_charges_spin.setDecimals(2)
+        self.other_charges_spin.setPrefix("Rs. ")
+        form_layout.addRow("Other Charges:", self.other_charges_spin)
         
         # Time out
         self.time_out_datetime = QDateTimeEdit()
@@ -100,8 +121,10 @@ class GatePassDialog(QDialog):
         # Gate operator
         self.operator_label = QLabel(f"{self.current_user['full_name']}")
         form_layout.addRow("Gate Operator:", self.operator_label)
-        
-        layout.addLayout(form_layout)
+        content_layout.addLayout(form_layout)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
         
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -197,6 +220,14 @@ class GatePassDialog(QDialog):
             self.driver_name_input.setText(self.gate_pass_data['driver_name'])
             self.vehicle_number_input.setText(self.gate_pass_data['vehicle_number'])
             self.quantity_spinbox.setValue(self.gate_pass_data['quantity'])
+            try:
+                self.fuel_cost_spin.setValue(float(self.gate_pass_data.get('fuel_cost') or 0))
+            except Exception:
+                self.fuel_cost_spin.setValue(0)
+            try:
+                self.other_charges_spin.setValue(float(self.gate_pass_data.get('other_charges') or 0))
+            except Exception:
+                self.other_charges_spin.setValue(0)
             
             # Parse and set datetime
             if self.gate_pass_data['time_out']:
@@ -228,6 +259,10 @@ class GatePassDialog(QDialog):
         self.driver_name_input.setEnabled(False)
         self.vehicle_number_input.setEnabled(False)
         self.quantity_spinbox.setEnabled(False)
+        if hasattr(self, 'fuel_cost_spin'):
+            self.fuel_cost_spin.setEnabled(False)
+        if hasattr(self, 'other_charges_spin'):
+            self.other_charges_spin.setEnabled(False)
         self.time_out_datetime.setEnabled(False)
         
         # Change button text
@@ -280,6 +315,8 @@ class GatePassDialog(QDialog):
             'driver_name': self.driver_name_input.text().strip(),
             'vehicle_number': self.vehicle_number_input.text().strip(),
             'quantity': self.quantity_spinbox.value(),
+            'fuel_cost': float(self.fuel_cost_spin.value()),
+            'other_charges': float(self.other_charges_spin.value()),
             'time_out': self.time_out_datetime.dateTime().toString("yyyy-MM-dd hh:mm:ss"),
             'time_in': time_in,
             'gate_operator_id': self.current_user['id']
@@ -337,14 +374,19 @@ class GatePassesWidget(QWidget):
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.load_gate_passes)
         controls_layout.addWidget(self.refresh_btn)
+
+        if self.current_user['role'] in ['Admin', 'Gate Operator']:
+            self.record_returns_btn = QPushButton("Record Returns")
+            self.record_returns_btn.clicked.connect(self.open_record_returns)
+            controls_layout.addWidget(self.record_returns_btn)
         
         layout.addLayout(controls_layout)
         
         # Gate passes table
         self.gate_passes_table = QTableWidget()
-        self.gate_passes_table.setColumnCount(10)
+        self.gate_passes_table.setColumnCount(11)
         self.gate_passes_table.setHorizontalHeaderLabels([
-            "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Gas Type", "Quantity", "Time Out", "Time In", "Actions"
+            "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Gas Type", "Quantity", "Time Out", "Time In", "Charges", "Actions"
         ])
         self.gate_passes_table.setAlternatingRowColors(True)
         self.gate_passes_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -359,7 +401,8 @@ class GatePassesWidget(QWidget):
         self.gate_passes_table.setColumnWidth(6, 90)
         self.gate_passes_table.setColumnWidth(7, 140)
         self.gate_passes_table.setColumnWidth(8, 140)
-        self.gate_passes_table.setColumnWidth(9, 180)
+        self.gate_passes_table.setColumnWidth(9, 120)
+        self.gate_passes_table.setColumnWidth(10, 180)
         layout.addWidget(self.gate_passes_table)
 
         self.set_role_permissions()
@@ -430,6 +473,8 @@ class GatePassesWidget(QWidget):
             else:
                 time_in_item.setForeground(Qt.darkGreen)
             self.gate_passes_table.setItem(row, 8, time_in_item)
+            charges = float(gate_pass.get('fuel_cost') or 0) + float(gate_pass.get('other_charges') or 0)
+            self.gate_passes_table.setItem(row, 9, QTableWidgetItem(f"Rs. {charges:,.2f}"))
             
             # Actions
             actions_widget = QWidget()
@@ -512,7 +557,7 @@ class GatePassesWidget(QWidget):
                 return_btn.clicked.connect(lambda checked, gp=gate_pass: self.mark_returned(gp))
                 actions_layout.addWidget(return_btn)
             
-            self.gate_passes_table.setCellWidget(row, 9, actions_widget)
+            self.gate_passes_table.setCellWidget(row, 10, actions_widget)
     
     def filter_gate_passes(self):
         """Filter gate passes based on search input"""
@@ -560,7 +605,9 @@ class GatePassesWidget(QWidget):
                     gas_type=gate_pass_data['gas_type'],
                     capacity=gate_pass_data['capacity'],
                     quantity=gate_pass_data['quantity'],
-                    gate_operator_id=gate_pass_data['gate_operator_id']
+                    gate_operator_id=gate_pass_data['gate_operator_id'],
+                    fuel_cost=gate_pass_data['fuel_cost'],
+                    other_charges=gate_pass_data['other_charges']
                 )
                 
                 self.db_manager.log_activity(
@@ -586,11 +633,9 @@ class GatePassesWidget(QWidget):
         if dialog.exec() == QDialog.Accepted:
             try:
                 updated_data = dialog.get_gate_pass_data()
-                
-                # Update gate pass in database
                 query = '''
                     UPDATE gate_passes 
-                    SET driver_name = ?, vehicle_number = ?, quantity = ?, time_out = ?
+                    SET driver_name = ?, vehicle_number = ?, quantity = ?, time_out = ?, fuel_cost = ?, other_charges = ?
                     WHERE id = ?
                 '''
                 self.db_manager.execute_update(query, (
@@ -598,6 +643,8 @@ class GatePassesWidget(QWidget):
                     updated_data['vehicle_number'],
                     updated_data['quantity'],
                     updated_data['time_out'],
+                    float(updated_data['fuel_cost']),
+                    float(updated_data['other_charges']),
                     gate_pass_data['id']
                 ))
                 
@@ -648,3 +695,313 @@ class GatePassesWidget(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to mark as returned: {str(e)}")
+
+    def open_record_returns(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Record Cylinder Returns")
+        dialog.setFixedSize(700, 500)
+        lay = QVBoxLayout(dialog)
+        lay.setSpacing(12)
+        lay.setContentsMargins(20, 20, 20, 20)
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.client_combo = QComboBox()
+        try:
+            clients = self.db_manager.get_clients("")
+            for c in clients:
+                self.client_combo.addItem(f"{c['name']} ({c['phone']})", c)
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load clients: {str(e)}")
+        form.addRow("Client:", self.client_combo)
+        lay.addLayout(form)
+        self.returns_table = QTableWidget()
+        self.returns_table.setColumnCount(5)
+        self.returns_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Outstanding", "Return Qty"])
+        self.returns_table.setAlternatingRowColors(True)
+        self.returns_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        lay.addWidget(self.returns_table)
+        btns = QHBoxLayout()
+        load_btn = QPushButton("Load")
+        save_btn = QPushButton("Save")
+        close_btn = QPushButton("Close")
+        btns.addWidget(load_btn)
+        btns.addWidget(save_btn)
+        btns.addWidget(close_btn)
+        lay.addLayout(btns)
+        def load_client():
+            idx = self.client_combo.currentIndex()
+            if idx < 0:
+                return
+            client = self.client_combo.itemData(idx)
+            try:
+                rows = self.db_manager.get_client_cylinder_balance(client['id'])
+                self.returns_table.setRowCount(len(rows))
+                for r, item in enumerate(rows):
+                    self.returns_table.setItem(r, 0, QTableWidgetItem(item['gas_type']))
+                    self.returns_table.setItem(r, 1, QTableWidgetItem(item['sub_type'] or ''))
+                    self.returns_table.setItem(r, 2, QTableWidgetItem(item['capacity']))
+                    self.returns_table.setItem(r, 3, QTableWidgetItem(str(item['outstanding'])))
+                    spin = QSpinBox()
+                    spin.setRange(0, int(item['outstanding']))
+                    spin.setValue(0)
+                    spin.setProperty('gas_product_id', item['gas_product_id'])
+                    self.returns_table.setCellWidget(r, 4, spin)
+                self.returns_table.resizeColumnsToContents()
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to load cylinder balance: {str(e)}")
+        def save_returns():
+            idx = self.client_combo.currentIndex()
+            if idx < 0:
+                return
+            client = self.client_combo.itemData(idx)
+            try:
+                total = 0
+                for r in range(self.returns_table.rowCount()):
+                    spin = self.returns_table.cellWidget(r, 4)
+                    if not spin:
+                        continue
+                    qty = spin.value()
+                    if qty > 0:
+                        gas_product_id = spin.property('gas_product_id')
+                        self.db_manager.add_cylinder_movement(
+                            client_id=client['id'],
+                            gas_product_id=gas_product_id,
+                            movement_type='RETURN',
+                            quantity=qty,
+                            operator_id=self.current_user['id']
+                        )
+                        total += qty
+                if total > 0:
+                    QMessageBox.information(self, "Success", f"Recorded {total} returned cylinders.")
+                    load_client()
+                else:
+                    QMessageBox.information(self, "Info", "No returns entered.")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to save returns: {str(e)}")
+        def close_dialog():
+            dialog.accept()
+        load_btn.clicked.connect(load_client)
+        save_btn.clicked.connect(save_returns)
+        close_btn.clicked.connect(close_dialog)
+        dialog.exec()
+
+class CylinderReturnsWidget(QWidget):
+    def __init__(self, db_manager: DatabaseManager, current_user: dict):
+        super().__init__()
+        self.db_manager = db_manager
+        self.current_user = current_user
+        self.init_ui()
+        self.load_summary()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        title = QLabel("Cylinder Returns")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        layout.addWidget(title)
+        controls = QHBoxLayout()
+        controls.setSpacing(10)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search clients...")
+        self.search_input.textChanged.connect(self.filter_summary)
+        controls.addWidget(self.search_input)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.load_summary)
+        controls.addWidget(self.refresh_btn)
+        layout.addLayout(controls)
+        self.summary_table = QTableWidget()
+        self.summary_table.setColumnCount(4)
+        self.summary_table.setHorizontalHeaderLabels(["Client", "Delivered", "Returned", "Outstanding"])
+        self.summary_table.setAlternatingRowColors(True)
+        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.summary_table.itemSelectionChanged.connect(self.on_client_selected)
+        layout.addWidget(self.summary_table)
+        self.detail_label = QLabel("Select a client to record returns")
+        self.detail_label.setStyleSheet("font-size: 14px; color: #555;")
+        layout.addWidget(self.detail_label)
+        self.detail_table = QTableWidget()
+        self.detail_table.setColumnCount(5)
+        self.detail_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Outstanding", "Return Qty"])
+        self.detail_table.setAlternatingRowColors(True)
+        self.detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.detail_table)
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+        self.save_btn = QPushButton("Save Returns")
+        self.save_btn.clicked.connect(self.save_returns)
+        actions.addWidget(self.save_btn)
+        layout.addLayout(actions)
+        self.set_role_permissions()
+
+    def set_role_permissions(self):
+        role = self.current_user['role']
+        self.save_btn.setEnabled(role in ['Admin', 'Gate Operator'])
+
+    def load_summary(self):
+        try:
+            rows = self.db_manager.get_clients_cylinder_summary()
+            self.summary_table.setRowCount(len(rows))
+            for r, item in enumerate(rows):
+                self.summary_table.setItem(r, 0, QTableWidgetItem(item['client_name']))
+                self.summary_table.setItem(r, 1, QTableWidgetItem(str(item['delivered'])))
+                self.summary_table.setItem(r, 2, QTableWidgetItem(str(item['returned'])))
+                self.summary_table.setItem(r, 3, QTableWidgetItem(str(item['outstanding'])))
+                self.summary_table.setVerticalHeaderItem(r, QTableWidgetItem(str(item['client_id'])))
+            self.summary_table.resizeColumnsToContents()
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load summary: {str(e)}")
+
+    def filter_summary(self):
+        text = self.search_input.text().strip().lower()
+        for r in range(self.summary_table.rowCount()):
+            client = self.summary_table.item(r, 0).text().lower() if self.summary_table.item(r, 0) else ""
+            self.summary_table.setRowHidden(r, text not in client)
+
+    def on_client_selected(self):
+        items = self.summary_table.selectedItems()
+        if not items:
+            return
+        row = items[0].row()
+        client_id_item = self.summary_table.verticalHeaderItem(row)
+        if not client_id_item:
+            return
+        client_id = int(client_id_item.text())
+        client_name = self.summary_table.item(row, 0).text()
+        self.detail_label.setText(f"Record returns for: {client_name}")
+        try:
+            balances = self.db_manager.get_client_cylinder_balance(client_id)
+            self.detail_table.setRowCount(len(balances))
+            for r, item in enumerate(balances):
+                self.detail_table.setItem(r, 0, QTableWidgetItem(item['gas_type']))
+                self.detail_table.setItem(r, 1, QTableWidgetItem(item['sub_type'] or ''))
+                self.detail_table.setItem(r, 2, QTableWidgetItem(item['capacity']))
+                self.detail_table.setItem(r, 3, QTableWidgetItem(str(item['outstanding'])))
+                spin = QSpinBox()
+                spin.setRange(0, int(item['outstanding']))
+                spin.setValue(0)
+                spin.setProperty('gas_product_id', item['gas_product_id'])
+                spin.setProperty('client_id', client_id)
+                self.detail_table.setCellWidget(r, 4, spin)
+            self.detail_table.resizeColumnsToContents()
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load details: {str(e)}")
+
+    def save_returns(self):
+        try:
+            total = 0
+            for r in range(self.detail_table.rowCount()):
+                spin = self.detail_table.cellWidget(r, 4)
+                if not spin:
+                    continue
+                qty = spin.value()
+                if qty > 0:
+                    client_id = spin.property('client_id')
+                    gas_product_id = spin.property('gas_product_id')
+                    self.db_manager.add_cylinder_movement(
+                        client_id=client_id,
+                        gas_product_id=gas_product_id,
+                        movement_type='RETURN',
+                        quantity=qty,
+                        operator_id=self.current_user['id']
+                    )
+                    total += qty
+            if total > 0:
+                QMessageBox.information(self, "Success", f"Recorded {total} returned cylinders.")
+                self.load_summary()
+                self.on_client_selected()
+            else:
+                QMessageBox.information(self, "Info", "No returns entered.")
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to save returns: {str(e)}")
+
+    def open_record_returns(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Record Cylinder Returns")
+        dialog.setFixedSize(700, 500)
+        lay = QVBoxLayout(dialog)
+        lay.setSpacing(12)
+        lay.setContentsMargins(20, 20, 20, 20)
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.client_combo = QComboBox()
+        try:
+            clients = self.db_manager.get_clients("")
+            for c in clients:
+                self.client_combo.addItem(f"{c['name']} ({c['phone']})", c)
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load clients: {str(e)}")
+        form.addRow("Client:", self.client_combo)
+        lay.addLayout(form)
+        self.returns_table = QTableWidget()
+        self.returns_table.setColumnCount(5)
+        self.returns_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Outstanding", "Return Qty"])
+        self.returns_table.setAlternatingRowColors(True)
+        self.returns_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        lay.addWidget(self.returns_table)
+        btns = QHBoxLayout()
+        load_btn = QPushButton("Load")
+        save_btn = QPushButton("Save")
+        close_btn = QPushButton("Close")
+        btns.addWidget(load_btn)
+        btns.addWidget(save_btn)
+        btns.addWidget(close_btn)
+        lay.addLayout(btns)
+        def load_client():
+            idx = self.client_combo.currentIndex()
+            if idx < 0:
+                return
+            client = self.client_combo.itemData(idx)
+            try:
+                rows = self.db_manager.get_client_cylinder_balance(client['id'])
+                self.returns_table.setRowCount(len(rows))
+                for r, item in enumerate(rows):
+                    self.returns_table.setItem(r, 0, QTableWidgetItem(item['gas_type']))
+                    self.returns_table.setItem(r, 1, QTableWidgetItem(item['sub_type'] or ''))
+                    self.returns_table.setItem(r, 2, QTableWidgetItem(item['capacity']))
+                    self.returns_table.setItem(r, 3, QTableWidgetItem(str(item['outstanding'])))
+                    spin = QSpinBox()
+                    spin.setRange(0, int(item['outstanding']))
+                    spin.setValue(0)
+                    # store product id as property
+                    spin.setProperty('gas_product_id', item['gas_product_id'])
+                    self.returns_table.setCellWidget(r, 4, spin)
+                self.returns_table.resizeColumnsToContents()
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to load cylinder balance: {str(e)}")
+        def save_returns():
+            idx = self.client_combo.currentIndex()
+            if idx < 0:
+                return
+            client = self.client_combo.itemData(idx)
+            try:
+                total = 0
+                for r in range(self.returns_table.rowCount()):
+                    spin = self.returns_table.cellWidget(r, 4)
+                    if not spin:
+                        continue
+                    qty = spin.value()
+                    if qty > 0:
+                        gas_product_id = spin.property('gas_product_id')
+                        self.db_manager.add_cylinder_movement(
+                            client_id=client['id'],
+                            gas_product_id=gas_product_id,
+                            movement_type='RETURN',
+                            quantity=qty,
+                            operator_id=self.current_user['id']
+                        )
+                        total += qty
+                if total > 0:
+                    QMessageBox.information(self, "Success", f"Recorded {total} returned cylinders.")
+                    load_client()
+                else:
+                    QMessageBox.information(self, "Info", "No returns entered.")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to save returns: {str(e)}")
+        def close_dialog():
+            dialog.accept()
+        load_btn.clicked.connect(load_client)
+        save_btn.clicked.connect(save_returns)
+        close_btn.clicked.connect(close_dialog)
+        dialog.exec()

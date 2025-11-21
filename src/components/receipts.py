@@ -8,7 +8,7 @@ from database_module import DatabaseManager
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
 from reportlab.lib import colors
 import os
 
@@ -18,7 +18,7 @@ class ReceiptDialog(QDialog):
         self.db_manager = db_manager
         self.receipt_data = receipt_data
         self.setWindowTitle(f"Receipt - {receipt_data['receipt_number']}")
-        self.setFixedSize(600, 700)
+        self.setFixedSize(520, 680)
         self.init_ui()
     
     def init_ui(self):
@@ -26,95 +26,11 @@ class ReceiptDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Header
-        header_label = QLabel("RECEIPT")
-        header_label.setAlignment(Qt.AlignCenter)
-        header_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(header_label)
-        
-        # Company info
-        company_info = QLabel("""
-<b>Rajput Gas Ltd.</b><br>
-Industrial Area, Phase 2<br>
-Phone: +92-42-1234567<br>
-Email: info@rajputgas.com
-        """)
-        company_info.setAlignment(Qt.AlignCenter)
-        layout.addWidget(company_info)
-        
-        # Receipt details
-        details_text = f"""
-<b>Receipt Number:</b> {self.receipt_data['receipt_number']}<br>
-<b>Date:</b> {self.receipt_data['created_at']}<br>
-<b>Client:</b> {self.receipt_data['client_name']}<br>
-<b>Phone:</b> {self.receipt_data['client_phone']}<br>
-<b>Company:</b> {self.receipt_data['client_company'] or 'N/A'}<br>
-        """
-        
-        details_edit = QTextEdit()
-        details_edit.setHtml(details_text)
-        details_edit.setReadOnly(True)
-        details_edit.setMaximumHeight(120)
-        layout.addWidget(details_edit)
-        
-        # Items table
-        items_label = QLabel("<b>Items:</b>")
-        layout.addWidget(items_label)
-        
-        items_table = QTableWidget()
-        items_table.setColumnCount(6)
-        items_table.setHorizontalHeaderLabels([
-            "Gas Type", "Capacity", "Quantity", "Unit Price", "Subtotal", "Total"
-        ])
-        items_table.setAlternatingRowColors(True)
-        items_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        items_table.setMaximumHeight(150)
-        
-        # Add item data
-        items_table.setRowCount(1)
-        items_table.setItem(0, 0, QTableWidgetItem(self.receipt_data['gas_type']))
-        items_table.setItem(0, 1, QTableWidgetItem(self.receipt_data['capacity']))
-        items_table.setItem(0, 2, QTableWidgetItem(str(self.receipt_data['quantity'])))
-        items_table.setItem(0, 3, QTableWidgetItem(f"Rs. {self.receipt_data['unit_price']:,.2f}"))
-        items_table.setItem(0, 4, QTableWidgetItem(f"Rs. {self.receipt_data['subtotal']:,.2f}"))
-        items_table.setItem(0, 5, QTableWidgetItem(f"Rs. {self.receipt_data['total_amount']:,.2f}"))
-        
-        items_table.resizeColumnsToContents()
-        layout.addWidget(items_table)
-        
-        # Totals
-        totals_text = f"""
-<b>Subtotal:</b> Rs. {self.receipt_data['subtotal']:,.2f}<br>
-<b>Tax (16%):</b> Rs. {self.receipt_data['tax_amount']:,.2f}<br>
-<b>Total Amount:</b> Rs. {self.receipt_data['total_amount']:,.2f}<br>
-<b>Amount Paid:</b> Rs. {self.receipt_data['amount_paid']:,.2f}<br>
-<b>Balance:</b> Rs. {self.receipt_data['balance']:,.2f}<br>
-        """
-        
-        totals_edit = QTextEdit()
-        totals_edit.setHtml(totals_text)
-        totals_edit.setReadOnly(True)
-        totals_edit.setMaximumHeight(100)
-        layout.addWidget(totals_edit)
-        
-        # Footer
-        footer_text = f"""
-<b>Cashier:</b> {self.receipt_data['cashier_name']}<br>
-<b>Payment Method:</b> Cash<br>
-<br>
-<b>Terms & Conditions:</b><br>
-1. Goods once sold cannot be returned.<br>
-2. Please keep this receipt for your records.<br>
-3. Outstanding balance must be cleared within 30 days.<br>
-<br>
-<b>Thank you for your business!</b>
-        """
-        
-        footer_edit = QTextEdit()
-        footer_edit.setHtml(footer_text)
-        footer_edit.setReadOnly(True)
-        footer_edit.setMaximumHeight(150)
-        layout.addWidget(footer_edit)
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        preview.setStyleSheet("font-size: 12px;")
+        preview.setHtml(self.generate_receipt_html())
+        layout.addWidget(preview)
         
         # Action buttons
         button_layout = QHBoxLayout()
@@ -144,7 +60,7 @@ Email: info@rajputgas.com
             from PySide6.QtGui import QTextDocument
             
             doc = QTextDocument()
-            html_content = self.generate_receipt_html()
+            html_content = self.generate_receipt_html(for_print=True)
             doc.setHtml(html_content)
             doc.print_(printer)
     
@@ -166,209 +82,176 @@ Email: info@rajputgas.com
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export PDF: {str(e)}")
     
-    def generate_receipt_html(self) -> str:
-        """Generate HTML content for receipt"""
+    def generate_receipt_html(self, for_print: bool = False) -> str:
+        items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
+        total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
+        style_screen = """
+body { font-family: Arial, sans-serif; margin: 0; color: #000; }
+.receipt { width: 300px; margin: 0 auto; padding: 10px; }
+.header { text-align: center; }
+.store { font-weight: 800; font-size: 16px; }
+.address { font-size: 11px; }
+.meta { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; }
+.title { text-align: center; font-size: 13px; font-weight: 700; margin: 8px 0; }
+.customer { font-size: 12px; margin: 6px 0; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 11px; }
+th, td { border: 1px solid #000; padding: 6px; text-align: center; }
+.summary { margin: 6px 0; font-size: 12px; }
+.boxes { display: flex; justify-content: space-between; font-size: 12px; }
+.box { border: 1px solid #000; padding: 4px 8px; min-width: 100px; display: inline-block; text-align: center; }
+.box.total { border: 2px solid #000; font-weight: 700; }
+.footer { text-align: center; font-size: 11px; margin-top: 12px; }
+        """
+        style_print = """
+body { font-family: Arial, sans-serif; margin: 0; color: #000; }
+.receipt { width: 190mm; margin: 0 auto; padding: 10mm; }
+.header { text-align: center; }
+.store { font-weight: 800; font-size: 16pt; }
+.address { font-size: 11pt; }
+.meta { display: flex; justify-content: space-between; font-size: 11pt; margin-top: 6pt; }
+.title { text-align: center; font-size: 13pt; font-weight: 700; margin: 8pt 0; }
+.customer { font-size: 12pt; margin: 6pt 0; }
+table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 11pt; }
+th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
+.summary { margin: 6pt 0; font-size: 12pt; }
+.boxes { display: flex; justify-content: space-between; font-size: 12pt; }
+.box { border: 1px solid #000; padding: 4pt 8pt; min-width: 30mm; display: inline-block; text-align: center; }
+.box.total { border: 2px solid #000; font-weight: 700; }
+.footer { text-align: center; font-size: 11pt; margin-top: 12pt; }
+        """
+        style = style_print if for_print else style_screen
+        rows = "".join([
+            f"<tr><td>{(item.get('created_at') or self.receipt_data['created_at'])[:10]}</td>"
+            f"<td>{item['gas_type']}</td>"
+            f"<td>{item['sub_type'] or ''} {item['capacity']}</td>"
+            f"<td>{item['quantity']}</td>"
+            f"<td>{float(item['unit_price']):,.2f}</td>"
+            f"<td>{float(item['total_amount']):,.2f}</td></tr>"
+            for item in items
+        ])
+        if not rows:
+            rows = f"<tr><td>{self.receipt_data['created_at'][:10]}</td><td>{self.receipt_data['gas_type']}</td><td>{self.receipt_data['capacity']}</td><td>{self.receipt_data['quantity']}</td><td>{self.receipt_data['unit_price']:,.2f}</td><td>{self.receipt_data['total_amount']:,.2f}</td></tr>"
         return f"""
 <html>
 <head>
-<style>
-body {{ font-family: Arial, sans-serif; margin: 20px; }}
-.header {{ text-align: center; margin-bottom: 20px; }}
-.details {{ margin-bottom: 20px; }}
-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
-th, td {{ padding: 8px; text-align: left; border: 1px solid #ddd; }}
-th {{ background-color: #f2f2f2; }}
-.totals {{ text-align: right; margin-bottom: 20px; }}
-.footer {{ margin-top: 30px; font-size: 12px; }}
-</style>
+<style>{style}</style>
 </head>
 <body>
-<div class="header">
-<h1>RECEIPT</h1>
-<h2>Rajput Gas Ltd.</h2>
-<p>Industrial Area, Phase 2<br>
-Phone: +92-42-1234567<br>
-Email: info@rajputgas.com</p>
-</div>
-
-<div class="details">
-<p><b>Receipt Number:</b> {self.receipt_data['receipt_number']}</p>
-<p><b>Date:</b> {self.receipt_data['created_at']}</p>
-<p><b>Client:</b> {self.receipt_data['client_name']}</p>
-<p><b>Phone:</b> {self.receipt_data['client_phone']}</p>
-<p><b>Company:</b> {self.receipt_data['client_company'] or 'N/A'}</p>
-</div>
-
-<table>
+<div class=\"receipt\"> 
+  <div class=\"header\">
+    <div class=\"store\">Rajput Gas Traders</div>
+    <div class=\"address\">Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>
+    <div class=\"address\">Prop: Saleem Ahmad | 0301-6465144</div>
+  </div>
+  <div class=\"meta\"><div>Date: {self.receipt_data['created_at'][:10]}</div><div>Receipt #: {self.receipt_data['receipt_number']}</div></div>
+  <div class=\"title\">GAS BILL</div>
+  <div class=\"customer\"><b>Customer:</b> {self.receipt_data['client_name']}</div>
+  <table>
 <tr>
-<th>Gas Type</th>
-<th>Capacity</th>
-<th>Quantity</th>
-<th>Unit Price</th>
-<th>Subtotal</th>
-<th>Total</th>
+<th>DATE</th>
+<th>GAS TYPE</th>
+<th>CAPACITY</th>
+<th>QTY</th>
+<th>UNIT PRICE</th>
+<th>TOTAL</th>
 </tr>
-<tr>
-<td>{self.receipt_data['gas_type']}</td>
-<td>{self.receipt_data['capacity']}</td>
-<td>{self.receipt_data['quantity']}</td>
-<td>Rs. {self.receipt_data['unit_price']:,.2f}</td>
-<td>Rs. {self.receipt_data['subtotal']:,.2f}</td>
-<td>Rs. {self.receipt_data['total_amount']:,.2f}</td>
-</tr>
+{rows}
 </table>
-
-<div class="totals">
-<p><b>Subtotal:</b> Rs. {self.receipt_data['subtotal']:,.2f}</p>
-<p><b>Tax (16%):</b> Rs. {self.receipt_data['tax_amount']:,.2f}</p>
-<p><b>Total Amount:</b> Rs. {self.receipt_data['total_amount']:,.2f}</p>
-<p><b>Amount Paid:</b> Rs. {self.receipt_data['amount_paid']:,.2f}</p>
-<p><b>Balance:</b> Rs. {self.receipt_data['balance']:,.2f}</p>
-</div>
-
-<div class="footer">
-<p><b>Cashier:</b> {self.receipt_data['cashier_name']}</p>
-<p><b>Payment Method:</b> Cash</p>
-<p><b>Terms & Conditions:</b><br>
-1. Goods once sold cannot be returned.<br>
-2. Please keep this receipt for your records.<br>
-3. Outstanding balance must be cleared within 30 days.</p>
-<p><b>Thank you for your business!</b></p>
+  <div class=\"summary\">
+    <div><b>TOTAL QTY</b> {total_qty}</div>
+    <div><b>GRAND TOTAL</b> {self.receipt_data['total_amount']:,.2f}</div>
+  </div>
+  <div class=\"boxes\">
+    <div>Pending Bill <span class=\"box\">{self.receipt_data['balance']:,.2f}</span></div>
+    <div>Total Bill <span class=\"box total\">{self.receipt_data['total_amount']:,.2f}</span></div>
+  </div>
+  <div style=\"margin-top:10pt;\">Signature________________</div>
+  <div class=\"footer\">Thanks for your business!</div>
 </div>
 </body>
 </html>
         """
     
     def generate_pdf_receipt(self, filename: str):
-        """Generate PDF receipt using ReportLab"""
-        doc = SimpleDocTemplate(filename, pagesize=A4)
+        items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
+        total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=(80 * mm, 200 * mm),
+            leftMargin=5 * mm,
+            rightMargin=5 * mm,
+            topMargin=5 * mm,
+            bottomMargin=5 * mm,
+        )
         styles = getSampleStyleSheet()
-        
-        # Custom styles
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
-            alignment=1  # Center alignment
-        )
-        
-        company_style = ParagraphStyle(
-            'CompanyStyle',
-            parent=styles['Normal'],
-            fontSize=12,
-            spaceAfter=20,
-            alignment=1  # Center alignment
-        )
-        
-        # Build PDF content
         story = []
-        
-        # Header
-        story.append(Paragraph("RECEIPT", title_style))
-        story.append(Paragraph("<b>Rajput Gas Ltd.</b>", company_style))
-        story.append(Paragraph("Industrial Area, Phase 2<br/>Phone: +92-42-1234567<br/>Email: info@rajputgas.com", company_style))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Receipt details
-        details_data = [
-            ["Receipt Number:", self.receipt_data['receipt_number']],
-            ["Date:", self.receipt_data['created_at']],
-            ["Client:", self.receipt_data['client_name']],
-            ["Phone:", self.receipt_data['client_phone']],
-            ["Company:", self.receipt_data['client_company'] or 'N/A']
-        ]
-        
-        details_table = Table(details_data, colWidths=[2*inch, 3*inch])
-        details_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        
-        story.append(details_table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Items table
-        story.append(Paragraph("<b>Items:</b>", styles['Heading3']))
-        
-        items_data = [
-            ["Gas Type", "Capacity", "Quantity", "Unit Price", "Subtotal", "Total"],
-            [
+        story.append(Paragraph('<b>Rajput Gas Traders</b>', ParagraphStyle('store', parent=styles['Normal'], alignment=1, fontSize=11)))
+        story.append(Paragraph('Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala', ParagraphStyle('addr', parent=styles['Normal'], alignment=1, fontSize=9)))
+        story.append(Paragraph('Prop: Saleem Ahmad | 0301-6465144', ParagraphStyle('contact', parent=styles['Normal'], alignment=1, fontSize=9)))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f'Date: {self.receipt_data["created_at"][:10]}    Receipt #: {self.receipt_data["receipt_number"]}', ParagraphStyle('meta', parent=styles['Normal'], alignment=0, fontSize=9)))
+        story.append(Paragraph('GAS BILL', ParagraphStyle('bill', parent=styles['Heading2'], alignment=1, fontSize=12)))
+        story.append(Paragraph(f'Customer: {self.receipt_data["client_name"]}', ParagraphStyle('cust', parent=styles['Normal'], alignment=0, fontSize=9)))
+        story.append(Spacer(1, 4))
+        items_data = [['DATE', 'GAS TYPE', 'CAPACITY', 'QTY', 'UNIT PRICE', 'TOTAL']]
+        if items:
+            for item in items:
+                items_data.append([
+                    (item.get('created_at') or self.receipt_data['created_at'])[:10],
+                    item['gas_type'],
+                    f"{item['sub_type'] or ''} {item['capacity']}",
+                    str(item['quantity']),
+                    f"{float(item['unit_price']):,.2f}",
+                    f"{float(item['total_amount']):,.2f}"
+                ])
+        else:
+            items_data.append([
+                self.receipt_data['created_at'][:10],
                 self.receipt_data['gas_type'],
                 self.receipt_data['capacity'],
                 str(self.receipt_data['quantity']),
-                f"Rs. {self.receipt_data['unit_price']:,.2f}",
-                f"Rs. {self.receipt_data['subtotal']:,.2f}",
-                f"Rs. {self.receipt_data['total_amount']:,.2f}"
-            ]
-        ]
-        
-        items_table = Table(items_data, colWidths=[1*inch, 1*inch, 0.8*inch, 1*inch, 1*inch, 1*inch])
+                f"{self.receipt_data['unit_price']:,.2f}",
+                f"{self.receipt_data['total_amount']:,.2f}"
+            ])
+        items_table = Table(items_data, colWidths=[15*mm, 15*mm, 10*mm, 5*mm, 12*mm, 13*mm])
         items_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
         ]))
-        
         story.append(items_table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Totals
-        totals_data = [
-            ["Subtotal:", f"Rs. {self.receipt_data['subtotal']:,.2f}"],
-            ["Tax (16%):", f"Rs. {self.receipt_data['tax_amount']:,.2f}"],
-            ["Total Amount:", f"Rs. {self.receipt_data['total_amount']:,.2f}"],
-            ["Amount Paid:", f"Rs. {self.receipt_data['amount_paid']:,.2f}"],
-            ["Balance:", f"Rs. {self.receipt_data['balance']:,.2f}"]
-        ]
-        
-        totals_table = Table(totals_data, colWidths=[3*inch, 2*inch])
+        story.append(Spacer(1, 4))
+        totals_data = [[
+            Paragraph('<b>TOTAL QTY</b>', ParagraphStyle('lab', parent=styles['Normal'], fontSize=9)),
+            Paragraph(str(total_qty), ParagraphStyle('val', parent=styles['Normal'], fontSize=9)),
+            Paragraph('<b>GRAND TOTAL</b>', ParagraphStyle('lab', parent=styles['Normal'], fontSize=9)),
+            Paragraph(f"{self.receipt_data['total_amount']:,.2f}", ParagraphStyle('val', parent=styles['Normal'], fontSize=9))
+        ]]
+        totals_table = Table(totals_data, colWidths=[18*mm, 8*mm, 18*mm, 16*mm])
         totals_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 2), (1, 2), 'Helvetica-Bold'),
-            ('FONTNAME', (0, 4), (1, 4), 'Helvetica-Bold'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8)
         ]))
-        
         story.append(totals_table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Footer
-        footer_data = [
-            ["Cashier:", self.receipt_data['cashier_name']],
-            ["Payment Method:", "Cash"],
-            ["", ""],
-            ["Terms & Conditions:", ""],
-            ["", "1. Goods once sold cannot be returned."],
-            ["", "2. Please keep this receipt for your records."],
-            ["", "3. Outstanding balance must be cleared within 30 days."],
-            ["", ""],
-            ["", "Thank you for your business!"]
+        story.append(Spacer(1, 4))
+        bill_boxes = [
+            ['Pending Bill', f"{self.receipt_data['balance']:,.2f}"],
+            ['Total Bill', f"{self.receipt_data['total_amount']:,.2f}"]
         ]
-        
-        footer_table = Table(footer_data, colWidths=[1.5*inch, 3.5*inch])
-        footer_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTNAME', (0, 3), (0, 3), 'Helvetica-Bold'),
-            ('FONTNAME', (0, 8), (1, 8), 'Helvetica-Bold'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
+        bill_table = Table(bill_boxes, colWidths=[30*mm, 30*mm])
+        bill_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9)
         ]))
-        
-        story.append(footer_table)
-        
-        # Build PDF
+        story.append(bill_table)
+        story.append(Spacer(1, 6))
+        story.append(Paragraph('Signature________________', styles['Normal']))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph('Thanks for your business!', ParagraphStyle('foot', parent=styles['Normal'], alignment=1)))
         doc.build(story)
 
 class ReceiptsWidget(QWidget):

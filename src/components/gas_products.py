@@ -94,7 +94,7 @@ class AddGasProductDialog(QDialog):
         if gas_type in ["Oxygen", "Nitrogen", "Organ Gas"]:
             capacities = ["1.4", "3.11", "6.23", "6.79", "8.4", "9.9"]
         elif gas_type == "LPG":
-            capacities = ["12kg", "45kg"]
+            capacities = ["12kg", "15kg", "45kg"]
         else:
             capacities = []
         

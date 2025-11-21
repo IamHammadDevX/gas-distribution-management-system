@@ -380,6 +380,17 @@ class SalesWidget(QWidget):
                         balance=balance,
                         created_by=self.current_user['id']
                     )
+                for item in self.current_products:
+                    p = item['product']
+                    self.db_manager.add_sale_item(
+                        sale_id=sale_id,
+                        gas_product_id=p['id'],
+                        quantity=item['quantity'],
+                        unit_price=item['unit_price'],
+                        subtotal=item['subtotal'],
+                        tax_amount=item['tax'],
+                        total_amount=item['total']
+                    )
                 receipt_number = self.db_manager.get_next_receipt_number()
                 self.db_manager.create_receipt(
                     receipt_number=receipt_number,
@@ -390,6 +401,16 @@ class SalesWidget(QWidget):
                     balance=balance,
                     created_by=self.current_user['id']
                 )
+                for item in self.current_products:
+                    p = item['product']
+                    self.db_manager.add_cylinder_movement(
+                        client_id=current_client_id,
+                        gas_product_id=p['id'],
+                        movement_type='DELIVERY',
+                        quantity=item['quantity'],
+                        operator_id=self.current_user['id'],
+                        sale_id=sale_id
+                    )
                 self.db_manager.log_activity(
                     "CREATE_SALE",
                     f"Created sale for client: {current_client_name}, Receipt: {receipt_number}",
