@@ -62,20 +62,20 @@ class DailyTransactionsWidget(QWidget):
         layout.addWidget(gate_group)
 
     def load_transactions(self):
-        d = self.date_edit.date().toPython()
-        self.load_sales_for_date(d)
-        self.load_gate_for_date(d)
+        d_str = self.date_edit.date().toString('yyyy-MM-dd')
+        self.load_sales_for_date(d_str)
+        self.load_gate_for_date(d_str)
 
-    def load_sales_for_date(self, day):
+    def load_sales_for_date(self, day_str):
         rows = self.db_manager.execute_query('''
             SELECT s.*, c.name as client_name, gp.gas_type, gp.sub_type, gp.capacity, u.full_name as cashier_name
             FROM sales s
             JOIN clients c ON s.client_id = c.id
             JOIN gas_products gp ON s.gas_product_id = gp.id
             JOIN users u ON s.created_by = u.id
-            WHERE DATE(s.created_at) = ?
+            WHERE DATE(s.created_at, 'localtime') = ?
             ORDER BY s.created_at DESC
-        ''', (day,))
+        ''', (day_str,))
         self.sales_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.sales_table.setItem(i, 0, QTableWidgetItem(r['created_at'][:16]))
@@ -101,14 +101,14 @@ class DailyTransactionsWidget(QWidget):
             self.sales_table.setItem(i, 6, bal_item)
             self.sales_table.setItem(i, 7, QTableWidgetItem(r['cashier_name']))
 
-    def load_gate_for_date(self, day):
+    def load_gate_for_date(self, day_str):
         rows = self.db_manager.execute_query('''
             SELECT gp.*, c.name as client_name
             FROM gate_passes gp
             JOIN clients c ON gp.client_id = c.id
-            WHERE DATE(gp.created_at) = ?
+            WHERE DATE(gp.time_out, 'localtime') = ?
             ORDER BY gp.created_at DESC
-        ''', (day,))
+        ''', (day_str,))
         self.gate_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.gate_table.setItem(i, 0, QTableWidgetItem(r['gate_pass_number']))
