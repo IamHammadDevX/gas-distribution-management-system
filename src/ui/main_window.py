@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy)
+                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
 from PySide6.QtGui import QFont, QGuiApplication
 from database_module import DatabaseManager
@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
         separator.setStyleSheet("background-color: #34495e;")
         nav_layout.addWidget(separator)
         
-        # Create navigation buttons
         self.nav_buttons = {}
         nav_items = [
             ("Dashboard", "dashboard"),
@@ -188,15 +187,25 @@ class MainWindow(QMainWindow):
             ("Reports", "reports"),
             ("Settings", "settings")
         ]
-        
+
+        buttons_container = QWidget()
+        buttons_layout = QVBoxLayout(buttons_container)
+        buttons_layout.setSpacing(0)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
         for text, name in nav_items:
             btn = QPushButton(text)
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, n=name: self.switch_page(n))
-            nav_layout.addWidget(btn)
+            buttons_layout.addWidget(btn)
             self.nav_buttons[name] = btn
-        
-        nav_layout.addStretch()
+        buttons_layout.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidget(buttons_container)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        nav_layout.addWidget(scroll)
         
         # User info section
         user_widget = QWidget()
@@ -233,6 +242,9 @@ class MainWindow(QMainWindow):
         user_layout.addWidget(logout_btn)
         
         nav_layout.addWidget(user_widget)
+        nav_layout.setStretch(0, 0)
+        nav_layout.setStretch(1, 1)
+        nav_layout.setStretch(2, 0)
     
     def create_status_bar(self):
         """Create status bar"""
