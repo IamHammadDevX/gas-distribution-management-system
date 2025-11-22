@@ -357,10 +357,32 @@ class MainWindow(QMainWindow):
     
     def create_dashboard_widget(self):
         """Create dashboard widget"""
+        from PySide6.QtWidgets import QGridLayout
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        top_bar = self.create_dashboard_top_bar()
+        layout.addWidget(top_bar)
+
+        stats_layout = QGridLayout()
+        stats_layout.setSpacing(20)
+
+        stats = self.get_dashboard_stats()
+        stat_cards = [
+            ("Total Cylinders", str(stats['total_cylinders']), "#34495e"),
+            ("Empty Cylinders Returned", str(stats['total_cylinders_in']), "#16a085"),
+            ("Not Returned Cylinders", str(stats['pending_cylinders']), "#e74c3c"),
+            ("Clients Count", str(stats['total_clients']), "#3498db"),
+            ("Employees Count", str(stats['employees']), "#9b59b6")
+        ]
+
+        for i, (title, value, color) in enumerate(stat_cards):
+            card = self.create_stat_card(title, value, color)
+            stats_layout.addWidget(card, i // 3, i % 3)
+
+        self.update_dashboard_stats(widget, stats)
+        layout.addLayout(stats_layout)
         layout.addStretch()
         return widget
     
@@ -494,7 +516,7 @@ class MainWindow(QMainWindow):
         # Pending = total delivered - total returned
         query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes'
         result = self.db_manager.execute_query(query)
-        total_delivered = result[0]['total'] if result else 0
+        total_delivered = int(result[0]['total']) if result else 0
         query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM cylinder_returns'
         result = self.db_manager.execute_query(query)
         total_returned = result[0]['total'] if result else 0
@@ -511,7 +533,8 @@ class MainWindow(QMainWindow):
             'cylinders_out_today': cylinders_out_today,
             'cylinders_in_today': cylinders_in_today,
             'pending_cylinders': pending_cylinders,
-            'total_cylinders_in': total_cylinders_in
+            'total_cylinders_in': total_cylinders_in,
+            'total_cylinders': total_delivered
         }
     
     def refresh_dashboard(self):
@@ -559,6 +582,16 @@ class MainWindow(QMainWindow):
                         value_label.setText(str(stats['pending_cylinders']))
                     elif title == "Total Cylinders In":
                         value_label.setText(str(stats['total_cylinders_in']))
+                    elif title == "Total Cylinders":
+                        value_label.setText(str(stats['total_cylinders']))
+                    elif title == "Empty Cylinders Returned":
+                        value_label.setText(str(stats['total_cylinders_in']))
+                    elif title == "Not Returned Cylinders":
+                        value_label.setText(str(stats['pending_cylinders']))
+                    elif title == "Clients Count":
+                        value_label.setText(str(stats['total_clients']))
+                    elif title == "Employees Count":
+                        value_label.setText(str(stats['employees']))
                         
         except Exception as e:
             print(f"Error updating dashboard stats: {str(e)}")
