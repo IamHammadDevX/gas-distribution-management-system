@@ -26,6 +26,23 @@ class GatePassDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+            }
+            QLineEdit, QComboBox, QSpinBox, QDateTimeEdit, QTextEdit {
+                padding: 6px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 14px;
+                background-color: #ffffff;
+                color: #333333;
+            }
+            QGroupBox {
+                font-weight: bold;
+            }
+        """)
         
         # Title
         title_label = QLabel("Gate Pass")
@@ -76,17 +93,20 @@ class GatePassDialog(QDialog):
         self.quantity_spinbox = QSpinBox()
         self.quantity_spinbox.setRange(1, 100)
         self.quantity_spinbox.setValue(1)
+        self.quantity_spinbox.setMinimumWidth(120)
         form_layout.addRow("Quantity *:", self.quantity_spinbox)
         
         # Time out
         self.time_out_datetime = QDateTimeEdit()
         self.time_out_datetime.setDateTime(QDateTime.currentDateTime())
         self.time_out_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self.time_out_datetime.setMinimumWidth(160)
         form_layout.addRow("Time Out:", self.time_out_datetime)
         
         # Time in (for viewing/editing existing gate passes)
         self.time_in_datetime = QDateTimeEdit()
         self.time_in_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self.time_in_datetime.setMinimumWidth(160)
         self.time_in_checkbox = QCheckBox("Mark as returned")
         self.time_in_checkbox.toggled.connect(self.on_time_in_toggled)
         
@@ -101,6 +121,7 @@ class GatePassDialog(QDialog):
         self.expected_in_datetime = QDateTimeEdit()
         self.expected_in_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
         self.expected_in_datetime.setDateTime(QDateTime.currentDateTime())
+        self.expected_in_datetime.setMinimumWidth(160)
         form_layout.addRow("Expected Return:", self.expected_in_datetime)
         
         # Gate operator

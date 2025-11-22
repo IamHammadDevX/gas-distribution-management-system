@@ -498,6 +498,44 @@ class DatabaseManager:
         ''', (client_id, gas_type, capacity))
         return rows[0]['id'] if rows else None
     
+    def get_type_summary_for_client(self, client_id: int) -> List[Dict]:
+        delivered = self.execute_query('''
+            SELECT gp.gas_type as gas_type, COALESCE(SUM(si.quantity),0) as delivered
+            FROM sale_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN receipts r ON r.sale_id = s.id
+            JOIN gas_products gp ON si.gas_product_id = gp.id
+            WHERE r.client_id = ?
+            GROUP BY gp.gas_type
+        ''', (client_id,))
+        if not delivered:
+            delivered = self.execute_query('''
+                SELECT gp.gas_type as gas_type, COALESCE(SUM(s.quantity),0) as delivered
+                FROM sales s
+                JOIN gas_products gp ON s.gas_product_id = gp.id
+                WHERE s.client_id = ?
+                GROUP BY gp.gas_type
+            ''', (client_id,))
+        returns = self.execute_query('''
+            SELECT gas_type, COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gas_type
+        ''', (client_id,))
+        rmap = {r['gas_type']: int(r['returned']) for r in returns}
+        out = []
+        for d in delivered:
+            gt = d['gas_type']
+            delv = int(d['delivered'])
+            ret = rmap.get(gt, 0)
+            out.append({
+                'gas_type': gt,
+                'delivered': delv,
+                'returned': ret,
+                'remaining': delv - ret
+            })
+        return out
+    
     def get_employees(self) -> List[Dict]:
         query = 'SELECT * FROM employees WHERE is_active = 1 ORDER BY name'
         return self.execute_query(query)

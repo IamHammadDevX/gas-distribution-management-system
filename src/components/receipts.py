@@ -4,9 +4,13 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTextEdit, QHeaderView, QGroupBox, QGridLayout)
 from PySide6.QtCore import Qt, QDateTime
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtGui import QTextDocument
+from PySide6.QtCore import QSizeF
+from PySide6.QtGui import QPageSize, QPageLayout
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from database_module import DatabaseManager
 from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, mm
 from reportlab.lib import colors
@@ -51,17 +55,23 @@ class ReceiptDialog(QDialog):
         layout.addLayout(button_layout)
     
     def print_receipt(self):
-        """Print the receipt"""
+        """Print the receipt (A4, small logo, fit content)"""
+        from PySide6.QtGui import QTextDocument
+        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+        from PySide6.QtGui import QPageSize, QPageLayout
+        from PySide6.QtCore import QSizeF
+
         printer = QPrinter(QPrinter.HighResolution)
+        printer.setPageSize(QPageSize(QPageSize.A4))
+        printer.setPageOrientation(QPageLayout.Portrait)
+        printer.setFullPage(False)
+
         dialog = QPrintDialog(printer, self)
-        
         if dialog.exec() == QDialog.Accepted:
-            # Create a QTextDocument for printing
-            from PySide6.QtGui import QTextDocument
-            
             doc = QTextDocument()
             html_content = self.generate_receipt_html(for_print=True)
             doc.setHtml(html_content)
+            doc.setPageSize(QSizeF(650, 900))  # Equivalent to usable A4, after margins
             doc.print_(printer)
     
     def export_pdf(self):
@@ -83,70 +93,87 @@ class ReceiptDialog(QDialog):
                 QMessageBox.critical(self, "Export Error", f"Failed to export PDF: {str(e)}")
     
     def generate_receipt_html(self, for_print: bool = False) -> str:
+        logo_path = "logo.png"  # Small logo
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
-        style_screen = """
-body { font-family: Arial, sans-serif; margin: 0; color: #000; }
-.receipt { width: 300px; margin: 0 auto; padding: 10px; }
-.header { text-align: center; }
-.store { font-weight: 800; font-size: 16px; }
-.address { font-size: 11px; }
-.meta { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; }
-.title { text-align: center; font-size: 13px; font-weight: 700; margin: 8px 0; }
-.customer { font-size: 12px; margin: 6px 0; }
-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 11px; }
-th, td { border: 1px solid #000; padding: 6px; text-align: center; }
-.summary { margin: 6px 0; font-size: 12px; }
-.boxes { display: flex; justify-content: space-between; font-size: 12px; }
-.box { border: 1px solid #000; padding: 4px 8px; min-width: 100px; display: inline-block; text-align: center; }
-.box.total { border: 2px solid #000; font-weight: 700; }
-.footer { text-align: center; font-size: 11px; margin-top: 12px; }
+        style_a4_fit = """
+body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0; }
+.receipt { 
+    max-width: 650px; 
+    min-width: 650px;
+    margin: 0 auto; 
+    padding: 24px 35px; 
+    border: 1.5px solid #222; 
+    background: #fff;
+}
+.header { 
+    text-align: left; 
+    border-bottom: 2px solid #333; 
+    padding-bottom: 8px; 
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+}
+.logo { height: 42px; width: auto; vertical-align: middle; margin-right: 18px; }
+.header-content { display: inline-block; vertical-align: middle; }
+.store-title { font-weight: 900; font-size: 28px; margin-bottom:2px;}
+.info { font-size: 13px; margin-top: 3px;}
+.meta-row { font-size: 13px; margin-top:6px; display:flex; justify-content:space-between; }
+.meta-row .label {font-weight: bold;}
+.title { text-align: center; font-size: 18px; font-weight: 700; margin: 14px 0 7px 0; text-decoration: underline;}
+.customer { font-size: 15px; margin: 8px 0 8px 0; }
+.tbl { width: 100%; border-collapse: collapse; margin: 8px 0 6px 0; font-size: 13px; background: #fff;}
+.tbl th, .tbl td { border: 1px solid #344; padding: 5px 3px; text-align: center; font-size: 13px;}
+.totals { font-size: 14px; font-weight: 700; text-align: right; margin-top: 4px;}
+.bill-box { margin-top: 8px; }
+.box-label { font-weight:700; margin-right: 6px;}
+.bill-table { width: 100%; margin-bottom: 6px;}
+.bill-table td { border: 1.5px solid #000; font-size: 15px; font-weight:700; padding: 4px 11px; text-align:center;}
+.footer { font-size: 13px; font-weight:600; text-align: center; border-top: 2px solid #444; padding-top: 9px; margin-top: 10px;}
+.signature { text-align:right; font-size:15px; font-style:italic; margin-top:13px;}
         """
-        style_print = """
-body { font-family: Arial, sans-serif; margin: 0; color: #000; }
-.receipt { width: 190mm; margin: 0 auto; padding: 10mm; }
-.header { text-align: center; }
-.store { font-weight: 800; font-size: 16pt; }
-.address { font-size: 11pt; }
-.meta { display: flex; justify-content: space-between; font-size: 11pt; margin-top: 6pt; }
-.title { text-align: center; font-size: 13pt; font-weight: 700; margin: 8pt 0; }
-.customer { font-size: 12pt; margin: 6pt 0; }
-table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 11pt; }
-th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
-.summary { margin: 6pt 0; font-size: 12pt; }
-.boxes { display: flex; justify-content: space-between; font-size: 12pt; }
-.box { border: 1px solid #000; padding: 4pt 8pt; min-width: 30mm; display: inline-block; text-align: center; }
-.box.total { border: 2px solid #000; font-weight: 700; }
-.footer { text-align: center; font-size: 11pt; margin-top: 12pt; }
-        """
-        style = style_print if for_print else style_screen
+        style = style_a4_fit
         rows = "".join([
-            f"<tr><td>{(item.get('created_at') or self.receipt_data['created_at'])[:10]}</td>"
+            f"<tr>"
+            f"<td>{(item.get('created_at') or self.receipt_data['created_at'])[:10]}</td>"
             f"<td>{item['gas_type']}</td>"
             f"<td>{item['sub_type'] or ''} {item['capacity']}</td>"
             f"<td>{item['quantity']}</td>"
-            f"<td>{float(item['unit_price']):,.2f}</td>"
-            f"<td>{float(item['total_amount']):,.2f}</td></tr>"
+            f"<td>{float(item['unit_price']):,.0f}</td>"
+            f"<td>{float(item['total_amount']):,.0f}</td>"
+            f"</tr>"
             for item in items
         ])
         if not rows:
-            rows = f"<tr><td>{self.receipt_data['created_at'][:10]}</td><td>{self.receipt_data['gas_type']}</td><td>{self.receipt_data['capacity']}</td><td>{self.receipt_data['quantity']}</td><td>{self.receipt_data['unit_price']:,.2f}</td><td>{self.receipt_data['total_amount']:,.2f}</td></tr>"
+            rows = (
+                f"<tr>"
+                f"<td>{self.receipt_data['created_at'][:10]}</td>"
+                f"<td>{self.receipt_data['gas_type']}</td>"
+                f"<td>{self.receipt_data['capacity']}</td>"
+                f"<td>{self.receipt_data['quantity']}</td>"
+                f"<td>{self.receipt_data['unit_price']:,.0f}</td>"
+                f"<td>{self.receipt_data['total_amount']:,.0f}</td>"
+                f"</tr>"
+            )
+        # HTML structure: logo is small and inline, everything fits
         return f"""
 <html>
 <head>
 <style>{style}</style>
 </head>
 <body>
-<div class=\"receipt\"> 
-  <div class=\"header\">
-    <div class=\"store\">Rajput Gas Traders</div>
-    <div class=\"address\">Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>
-    <div class=\"address\">Prop: Saleem Ahmad | 0301-6465144</div>
+<div class="receipt"> 
+  <div class="header">
+    <img src="{logo_path}" class="logo" alt="Logo"/>
+    <div class="header-content">
+      <div class="store-title">RAJPUT GAS TRADERS</div>
+      <div class="info">Prop: Saleem Ahmad | 0301-6465144</div>
+      <div class="info">Date: {self.receipt_data['created_at'][:10]} &nbsp;&nbsp; Ref: {self.receipt_data.get('receipt_number','')}</div>
+    </div>
   </div>
-  <div class=\"meta\"><div>Date: {self.receipt_data['created_at'][:10]}</div><div>Receipt #: {self.receipt_data['receipt_number']}</div></div>
-  <div class=\"title\">GAS BILL</div>
-  <div class=\"customer\"><b>Customer:</b> {self.receipt_data['client_name']}</div>
-  <table>
+  <div class="title">GAS BILL</div>
+  <div class="customer"><b>CUSTOMER NAME :</b> {self.receipt_data['client_name']}</div>
+  <table class="tbl">
 <tr>
 <th>DATE</th>
 <th>GAS TYPE</th>
@@ -156,23 +183,34 @@ th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
 <th>TOTAL</th>
 </tr>
 {rows}
+<tr style="font-weight:bold; background:#fff;">
+<td colspan="3" style="text-align:right;">TOTAL QTY</td>
+<td>{total_qty}</td>
+<td style="text-align:right;">GRAND TOTAL</td>
+<td>{float(self.receipt_data['total_amount']):,.0f}</td>
+</tr>
 </table>
-  <div class=\"summary\">
-    <div><b>TOTAL QTY</b> {total_qty}</div>
-    <div><b>GRAND TOTAL</b> {self.receipt_data['total_amount']:,.2f}</div>
+  <div class="bill-box">
+    <table class="bill-table">
+        <tr>
+            <td class="box-label">Pending Bill</td>
+            <td>{self.receipt_data['balance']:,.0f}</td>
+        </tr>
+        <tr>
+            <td class="box-label">Total Bill</td>
+            <td>{float(self.receipt_data['total_amount']):,.0f}</td>
+        </tr>
+    </table>
   </div>
-  <div class=\"boxes\">
-    <div>Pending Bill <span class=\"box\">{self.receipt_data['balance']:,.2f}</span></div>
-    <div>Total Bill <span class=\"box total\">{self.receipt_data['total_amount']:,.2f}</span></div>
-  </div>
-  <div style=\"margin-top:10pt;\">Signature________________</div>
-  <div class=\"footer\">Thanks for your business!</div>
+  <div class="signature">Signature________________</div>
+  <div class="footer">Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>
 </div>
 </body>
 </html>
         """
-    
+
     def generate_pdf_receipt(self, filename: str):
+        logo_path = "logo.png" # update as needed
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
         doc = SimpleDocTemplate(
@@ -180,19 +218,31 @@ th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
             pagesize=(80 * mm, 200 * mm),
             leftMargin=5 * mm,
             rightMargin=5 * mm,
-            topMargin=5 * mm,
+            topMargin=7 * mm,
             bottomMargin=5 * mm,
         )
         styles = getSampleStyleSheet()
         story = []
-        story.append(Paragraph('<b>Rajput Gas Traders</b>', ParagraphStyle('store', parent=styles['Normal'], alignment=1, fontSize=11)))
-        story.append(Paragraph('Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala', ParagraphStyle('addr', parent=styles['Normal'], alignment=1, fontSize=9)))
-        story.append(Paragraph('Prop: Saleem Ahmad | 0301-6465144', ParagraphStyle('contact', parent=styles['Normal'], alignment=1, fontSize=9)))
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(f'Date: {self.receipt_data["created_at"][:10]}    Receipt #: {self.receipt_data["receipt_number"]}', ParagraphStyle('meta', parent=styles['Normal'], alignment=0, fontSize=9)))
-        story.append(Paragraph('GAS BILL', ParagraphStyle('bill', parent=styles['Heading2'], alignment=1, fontSize=12)))
-        story.append(Paragraph(f'Customer: {self.receipt_data["client_name"]}', ParagraphStyle('cust', parent=styles['Normal'], alignment=0, fontSize=9)))
+        # Logo -- (will skip if logo isn't found)
+        if os.path.exists(logo_path):
+            story.append(Image(logo_path, width=38*mm, height=19*mm))
+
+        # Top Title
+        story.append(Paragraph('<b style="font-size:16pt;">RAJPUT GAS TRADERS</b>', ParagraphStyle('store', parent=styles['Normal'], alignment=1, fontSize=16)))
+        story.append(Paragraph('Prop: Saleem Ahmad | 0301-6465144', ParagraphStyle('prop', parent=styles['Normal'], alignment=1, fontSize=10)))
         story.append(Spacer(1, 4))
+        # Meta row
+        meta_row = f"""
+            <b>Date:</b> {self.receipt_data['created_at'][:10]}
+            &nbsp;&nbsp; <b>Ref:</b> {self.receipt_data.get('receipt_number', '')}
+        """
+        story.append(Paragraph(meta_row, ParagraphStyle('meta', parent=styles['Normal'], alignment=0, fontSize=10)))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph('GAS BILL', ParagraphStyle('bill', parent=styles['Heading2'], alignment=1, fontSize=13)))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f'<b>CUSTOMER NAME :</b> {self.receipt_data["client_name"]}', ParagraphStyle('cust', parent=styles['Normal'], alignment=0, fontSize=11)))
+        story.append(Spacer(1, 6))
+        # Table header and body
         items_data = [['DATE', 'GAS TYPE', 'CAPACITY', 'QTY', 'UNIT PRICE', 'TOTAL']]
         if items:
             for item in items:
@@ -201,8 +251,8 @@ th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
                     item['gas_type'],
                     f"{item['sub_type'] or ''} {item['capacity']}",
                     str(item['quantity']),
-                    f"{float(item['unit_price']):,.2f}",
-                    f"{float(item['total_amount']):,.2f}"
+                    f"{float(item['unit_price']):,.0f}",
+                    f"{float(item['total_amount']):,.0f}"
                 ])
         else:
             items_data.append([
@@ -210,48 +260,168 @@ th, td { border: 1px solid #000; padding: 6pt; text-align: center; }
                 self.receipt_data['gas_type'],
                 self.receipt_data['capacity'],
                 str(self.receipt_data['quantity']),
-                f"{self.receipt_data['unit_price']:,.2f}",
-                f"{self.receipt_data['total_amount']:,.2f}"
+                f"{self.receipt_data['unit_price']:,.0f}",
+                f"{self.receipt_data['total_amount']:,.0f}"
             ])
-        items_table = Table(items_data, colWidths=[15*mm, 15*mm, 10*mm, 5*mm, 12*mm, 13*mm])
+        items_table = Table(items_data, colWidths=[15*mm, 14*mm, 14*mm, 9*mm, 10*mm, 14*mm])
         items_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
         ]))
         story.append(items_table)
-        story.append(Spacer(1, 4))
-        totals_data = [[
-            Paragraph('<b>TOTAL QTY</b>', ParagraphStyle('lab', parent=styles['Normal'], fontSize=9)),
-            Paragraph(str(total_qty), ParagraphStyle('val', parent=styles['Normal'], fontSize=9)),
-            Paragraph('<b>GRAND TOTAL</b>', ParagraphStyle('lab', parent=styles['Normal'], fontSize=9)),
-            Paragraph(f"{self.receipt_data['total_amount']:,.2f}", ParagraphStyle('val', parent=styles['Normal'], fontSize=9))
-        ]]
-        totals_table = Table(totals_data, colWidths=[18*mm, 8*mm, 18*mm, 16*mm])
+        # Footer row for totals
+        totals_data = [
+            ["", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]
+        ]
+        totals_table = Table(totals_data, colWidths=[15*mm,14*mm,14*mm,9*mm,10*mm,14*mm])
         totals_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8)
         ]))
         story.append(totals_table)
-        story.append(Spacer(1, 4))
-        bill_boxes = [
-            ['Pending Bill', f"{self.receipt_data['balance']:,.2f}"],
-            ['Total Bill', f"{self.receipt_data['total_amount']:,.2f}"]
-        ]
-        bill_table = Table(bill_boxes, colWidths=[30*mm, 30*mm])
+        story.append(Spacer(1, 7))
+        # Bill/Pending Box
+        labels = [['Pending Bill', f"{self.receipt_data['balance']:,.0f}"], ['Total Bill', f"{self.receipt_data['total_amount']:,.0f}"]]
+        bill_table = Table(labels, colWidths=[24*mm, 24*mm])
         bill_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9)
+            ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
         ]))
         story.append(bill_table)
-        story.append(Spacer(1, 6))
-        story.append(Paragraph('Signature________________', styles['Normal']))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph('Thanks for your business!', ParagraphStyle('foot', parent=styles['Normal'], alignment=1)))
+        story.append(Spacer(1, 8))
+        # Signature
+        story.append(Paragraph('Signature________________', ParagraphStyle('sign', parent=styles['Normal'], alignment=2, fontSize=12)))
+        story.append(Spacer(1, 7))
+        # Footer
+        story.append(Paragraph('Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala', ParagraphStyle('foot', parent=styles['Normal'], alignment=1, fontSize=12, textColor=colors.black, spaceBefore=12, spaceAfter=8)))
+        doc.build(story)
+    
+    def generate_pdf_receipt(self, filename: str):
+        logo_path = "logo.png"  # Update as needed; must be in your project root or use correct path
+        items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
+        total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
+        from reportlab.lib.pagesizes import A4
+
+        # -- Layout for A4 --
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=A4,
+            leftMargin=25 * mm,
+            rightMargin=25 * mm,
+            topMargin=20 * mm,
+            bottomMargin=15 * mm,
+        )
+        styles = getSampleStyleSheet()
+        styleTitle = ParagraphStyle('store', parent=styles['Normal'], alignment=1, fontSize=22, spaceAfter=8)
+        styleContact = ParagraphStyle('contact', parent=styles['Normal'], alignment=1, fontSize=13, spaceAfter=4)
+        styleMeta = ParagraphStyle('meta', parent=styles['Normal'], alignment=1, fontSize=13, spaceAfter=10)
+        styleBillTitle = ParagraphStyle('bill', parent=styles['Normal'], alignment=1, fontSize=17, spaceAfter=7)
+        styleLabel = ParagraphStyle('label', parent=styles['Normal'], alignment=0, fontSize=14, spaceAfter=0)
+        styleFooter = ParagraphStyle('footer', parent=styles['Normal'], alignment=1, fontSize=14, spaceBefore=14)
+        styleSignature = ParagraphStyle('sign', parent=styles['Normal'], alignment=2, fontSize=15, italic=True)
+        
+        story = []
+        # -- Logo (small, centered) --
+        if os.path.exists(logo_path):
+            img = Image(logo_path)
+            img.drawHeight = 18 * mm
+            img.drawWidth = 36 * mm
+            img.hAlign = 'CENTER'
+            story.append(img)
+            story.append(Spacer(1, 6))
+        # -- Business Info --
+        story.append(Paragraph("RAJPUT GAS TRADERS", styleTitle))
+        story.append(Paragraph("Prop: Saleem Ahmad | 0301-6465144", styleContact))
+        story.append(Spacer(1, 3))
+        # -- Meta Info --
+        meta_row = f"<b>Date:</b> {self.receipt_data['created_at'][:10]} &nbsp;&nbsp;&nbsp; <b>Ref:</b> {self.receipt_data.get('receipt_number', '')}"
+        story.append(Paragraph(meta_row, styleMeta))
+        story.append(Paragraph("GAS BILL", styleBillTitle))
+        story.append(Paragraph(f"<b>CUSTOMER NAME :</b> {self.receipt_data['client_name']}", styleLabel))
+        story.append(Spacer(1, 8))
+        # -- Receipt Table --
+        items_data = [['DATE', 'GAS TYPE', 'CAPACITY', 'QTY', 'UNIT PRICE', 'TOTAL']]
+        if items:
+            for item in items:
+                items_data.append([
+                    (item.get('created_at') or self.receipt_data['created_at'])[:10],
+                    item['gas_type'],
+                    f"{item['sub_type'] or ''} {item['capacity']}",
+                    str(item['quantity']),
+                    f"{float(item['unit_price']):,.0f}",
+                    f"{float(item['total_amount']):,.0f}"
+                ])
+        else:
+            items_data.append([
+                self.receipt_data['created_at'][:10],
+                self.receipt_data['gas_type'],
+                self.receipt_data['capacity'],
+                str(self.receipt_data['quantity']),
+                f"{self.receipt_data['unit_price']:,.0f}",
+                f"{self.receipt_data['total_amount']:,.0f}"
+            ])
+        # For A4: wider columns, bigger fonts
+        items_table = Table(
+            items_data,
+            colWidths=[40*mm, 35*mm, 32*mm, 20*mm, 30*mm, 30*mm],
+            hAlign='CENTER'
+        )
+        items_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1.2, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),  # header
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),  # header
+            ('FONTSIZE', (0, 1), (-1, -1), 13),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.white),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+        ]))
+        story.append(items_table)
+        # -- Totals --
+        totals_data = [
+            ["", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]
+        ]
+        totals_table = Table(totals_data, colWidths=[40*mm, 35*mm, 32*mm, 20*mm, 30*mm, 30*mm], hAlign='CENTER')
+        totals_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1.4, colors.black),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 13),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(totals_table)
+        story.append(Spacer(1, 14))
+        # -- Bill/Pending Box --
+        labels = [['Pending Bill', f"{self.receipt_data['balance']:,.0f}"], ['Total Bill', f"{self.receipt_data['total_amount']:,.0f}"]]
+        bill_table = Table(labels, colWidths=[52*mm, 52*mm], hAlign='CENTER')
+        bill_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 1.4, colors.black),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTSIZE', (0, 0), (-1, -1), 15),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('TOPPADDING', (0, 0), (-1, -1), 7),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ]))
+        story.append(bill_table)
+        story.append(Spacer(1, 18))
+        # -- Signature --
+        story.append(Paragraph('Signature________________', styleSignature))
+        story.append(Spacer(1, 18))
+        # -- Footer --
+        story.append(Paragraph('Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala', styleFooter))
         doc.build(story)
 
 class ReceiptsWidget(QWidget):

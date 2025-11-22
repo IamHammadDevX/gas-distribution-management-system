@@ -42,6 +42,17 @@ class CylinderTrackWidget(QWidget):
         s_layout.addWidget(self.summary_table)
         layout.addWidget(summary_group)
 
+        type_group = QGroupBox("Summary by Type")
+        t_layout = QVBoxLayout(type_group)
+        self.type_summary_table = QTableWidget()
+        self.type_summary_table.setColumnCount(5)
+        self.type_summary_table.setHorizontalHeaderLabels(["Gas Type", "Delivered", "Returned", "Remaining", "Status"])
+        self.type_summary_table.setAlternatingRowColors(True)
+        self.type_summary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.type_summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        t_layout.addWidget(self.type_summary_table)
+        layout.addWidget(type_group)
+
         deliveries_group = QGroupBox("Deliveries & Returns (Gate Passes)")
         d_layout = QVBoxLayout(deliveries_group)
         self.deliveries_table = QTableWidget()
@@ -107,6 +118,28 @@ class CylinderTrackWidget(QWidget):
         self.gas_combo.addItems(sorted(list(gas_types)))
         self.capacity_combo.clear()
         self.capacity_combo.addItems(sorted(list(capacities)))
+
+        # type-level summary based on purchases and returns
+        type_summary = self.db_manager.get_type_summary_for_client(client_id)
+        self.type_summary_table.setRowCount(len(type_summary))
+        for i, ts in enumerate(type_summary):
+            remaining = int(ts['remaining'])
+            status = "Not returned" if remaining > 0 else "Returned"
+            self.type_summary_table.setItem(i, 0, QTableWidgetItem(ts['gas_type']))
+            self.type_summary_table.setItem(i, 1, QTableWidgetItem(str(ts['delivered'])))
+            self.type_summary_table.setItem(i, 2, QTableWidgetItem(str(ts['returned'])))
+            rem = QTableWidgetItem(str(remaining))
+            if remaining > 0:
+                rem.setForeground(Qt.red)
+            else:
+                rem.setForeground(Qt.darkGreen)
+            self.type_summary_table.setItem(i, 3, rem)
+            st_item = QTableWidgetItem(status)
+            if status == "Not returned":
+                st_item.setForeground(Qt.red)
+            else:
+                st_item.setForeground(Qt.darkGreen)
+            self.type_summary_table.setItem(i, 4, st_item)
 
         # load deliveries table
         deliveries = self.db_manager.get_client_deliveries_with_returns(client_id)
