@@ -13,17 +13,19 @@ class CylinderTrackWidget(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(18)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        title = QLabel("Cylinder Track")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title = QLabel("Cylinder Track (Client Return Status)")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #205087; margin-bottom: 8px;")
         layout.addWidget(title)
 
         bar = QHBoxLayout()
-        bar.setSpacing(10)
+        bar.setSpacing(12)
         self.client_combo = QComboBox()
+        self.client_combo.setMinimumWidth(300)
         self.client_combo.currentIndexChanged.connect(self.load_summary)
+        bar.addWidget(QLabel("Select Client:"))
         bar.addWidget(self.client_combo)
 
         refresh_btn = QPushButton("Refresh")
@@ -31,39 +33,22 @@ class CylinderTrackWidget(QWidget):
         bar.addWidget(refresh_btn)
         layout.addLayout(bar)
 
-        summary_group = QGroupBox("Per-client Cylinder Summary")
+        # =========== MAIN TABLE: Per Cylinder Purchase Track ===========
+        summary_group = QGroupBox("Client Cylinder Return Status")
         s_layout = QVBoxLayout(summary_group)
         self.summary_table = QTableWidget()
-        self.summary_table.setColumnCount(6)
-        self.summary_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Delivered", "Returned", "Remaining"])
+        self.summary_table.setColumnCount(7)
+        self.summary_table.setHorizontalHeaderLabels([
+            "Gas Type", "Sub Type", "Capacity", "Purchased", "Returned", "Status", "Return Now"
+        ])
         self.summary_table.setAlternatingRowColors(True)
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.summary_table.verticalHeader().setVisible(False)
         s_layout.addWidget(self.summary_table)
         layout.addWidget(summary_group)
 
-        type_group = QGroupBox("Summary by Type")
-        t_layout = QVBoxLayout(type_group)
-        self.type_summary_table = QTableWidget()
-        self.type_summary_table.setColumnCount(5)
-        self.type_summary_table.setHorizontalHeaderLabels(["Gas Type", "Delivered", "Returned", "Remaining", "Status"])
-        self.type_summary_table.setAlternatingRowColors(True)
-        self.type_summary_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.type_summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        t_layout.addWidget(self.type_summary_table)
-        layout.addWidget(type_group)
-
-        deliveries_group = QGroupBox("Deliveries & Returns (Gate Passes)")
-        d_layout = QVBoxLayout(deliveries_group)
-        self.deliveries_table = QTableWidget()
-        self.deliveries_table.setColumnCount(9)
-        self.deliveries_table.setHorizontalHeaderLabels(["Gate Pass #", "Gas", "Sub Type", "Capacity", "Delivered", "Returned", "Remaining", "Out", "In"])
-        self.deliveries_table.setAlternatingRowColors(True)
-        self.deliveries_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.deliveries_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        d_layout.addWidget(self.deliveries_table)
-        layout.addWidget(deliveries_group)
-
+        # =========== Entry controls ===========
         entry_group = QGroupBox("Record Cylinder Return")
         e_layout = QHBoxLayout(entry_group)
         self.gas_combo = QComboBox()
@@ -91,26 +76,39 @@ class CylinderTrackWidget(QWidget):
 
     def load_summary(self):
         current = self.client_combo.currentData()
+        self.summary_table.setRowCount(0)
         if not current:
-            self.summary_table.setRowCount(0)
             return
         client_id = current['id']
         summary = self.db_manager.get_cylinder_summary_for_client(client_id)
-        self.summary_table.setRowCount(len(summary))
+        # Track for combos
         gas_types = set()
         capacities = set()
+        self.summary_table.setRowCount(len(summary))
         for i, s in enumerate(summary):
+            # Core info
             self.summary_table.setItem(i, 0, QTableWidgetItem(s['gas_type']))
             self.summary_table.setItem(i, 1, QTableWidgetItem(s.get('sub_type') or ''))
             self.summary_table.setItem(i, 2, QTableWidgetItem(s['capacity']))
-            self.summary_table.setItem(i, 3, QTableWidgetItem(str(s['delivered'])))
-            self.summary_table.setItem(i, 4, QTableWidgetItem(str(s['returned'])))
-            rem_item = QTableWidgetItem(str(s['remaining']))
-            if s['remaining'] > 0:
-                rem_item.setForeground(Qt.red)
+            purchased = int(s['delivered'])
+            returned = int(s['returned'])
+            # Ensure returned never exceeds purchased (defensive)
+            if returned > purchased:
+                returned = purchased
+            remaining = purchased - returned
+            self.summary_table.setItem(i, 3, QTableWidgetItem(str(purchased)))
+            self.summary_table.setItem(i, 4, QTableWidgetItem(str(returned)))
+            status_item = QTableWidgetItem("Returned" if remaining == 0 else f"Pending ({remaining})")
+            if remaining == 0:
+                status_item.setForeground(Qt.darkGreen)
             else:
-                rem_item.setForeground(Qt.darkGreen)
-            self.summary_table.setItem(i, 5, rem_item)
+                status_item.setForeground(Qt.red)
+            self.summary_table.setItem(i, 5, status_item)
+            # Quick return button cell (for simple UI)
+            btn = QPushButton("Return" if remaining > 0 else "Done")
+            btn.setEnabled(remaining > 0)
+            btn.clicked.connect(lambda _, gi=i: self.start_return_from_row(gi))
+            self.summary_table.setCellWidget(i, 6, btn)
             gas_types.add(s['gas_type'])
             capacities.add(s['capacity'])
         # populate return entry combos from summary
@@ -119,52 +117,16 @@ class CylinderTrackWidget(QWidget):
         self.capacity_combo.clear()
         self.capacity_combo.addItems(sorted(list(capacities)))
 
-        # type-level summary based on purchases and returns
-        type_summary = self.db_manager.get_type_summary_for_client(client_id)
-        self.type_summary_table.setRowCount(len(type_summary))
-        for i, ts in enumerate(type_summary):
-            remaining = int(ts['remaining'])
-            status = "Not returned" if remaining > 0 else "Returned"
-            self.type_summary_table.setItem(i, 0, QTableWidgetItem(ts['gas_type']))
-            self.type_summary_table.setItem(i, 1, QTableWidgetItem(str(ts['delivered'])))
-            self.type_summary_table.setItem(i, 2, QTableWidgetItem(str(ts['returned'])))
-            rem = QTableWidgetItem(str(remaining))
-            if remaining > 0:
-                rem.setForeground(Qt.red)
-            else:
-                rem.setForeground(Qt.darkGreen)
-            self.type_summary_table.setItem(i, 3, rem)
-            st_item = QTableWidgetItem(status)
-            if status == "Not returned":
-                st_item.setForeground(Qt.red)
-            else:
-                st_item.setForeground(Qt.darkGreen)
-            self.type_summary_table.setItem(i, 4, st_item)
-
-        # load deliveries table
-        deliveries = self.db_manager.get_client_deliveries_with_returns(client_id)
-        self.deliveries_table.setRowCount(len(deliveries))
-        for i, d in enumerate(deliveries):
-            self.deliveries_table.setItem(i, 0, QTableWidgetItem(d['gate_pass_number']))
-            self.deliveries_table.setItem(i, 1, QTableWidgetItem(d['gas_type']))
-            self.deliveries_table.setItem(i, 2, QTableWidgetItem(d.get('sub_type') or ''))
-            self.deliveries_table.setItem(i, 3, QTableWidgetItem(d['capacity']))
-            self.deliveries_table.setItem(i, 4, QTableWidgetItem(str(d['delivered'])))
-            self.deliveries_table.setItem(i, 5, QTableWidgetItem(str(d['returned'])))
-            rem = QTableWidgetItem(str(d['remaining']))
-            if d['remaining'] > 0:
-                rem.setForeground(Qt.red)
-            else:
-                rem.setForeground(Qt.darkGreen)
-            self.deliveries_table.setItem(i, 6, rem)
-            out_item = QTableWidgetItem(d['time_out'][:16] if d['time_out'] else '')
-            self.deliveries_table.setItem(i, 7, out_item)
-            in_item = QTableWidgetItem(d['time_in'][:16] if d['time_in'] else 'Not returned')
-            if not d['time_in']:
-                in_item.setForeground(Qt.red)
-            else:
-                in_item.setForeground(Qt.darkGreen)
-            self.deliveries_table.setItem(i, 8, in_item)
+    def start_return_from_row(self, row):
+        gas = self.summary_table.item(row, 0).text()
+        cap = self.summary_table.item(row, 2).text()
+        purchased = int(self.summary_table.item(row, 3).text())
+        returned = int(self.summary_table.item(row, 4).text())
+        remain = purchased - returned
+        self.gas_combo.setCurrentText(gas)
+        self.capacity_combo.setCurrentText(cap)
+        self.qty_spin.setMaximum(remain)
+        self.qty_spin.setValue(remain if remain < 10 and remain != 0 else 1)
 
     def save_return(self):
         client = self.client_combo.currentData()
@@ -173,28 +135,25 @@ class CylinderTrackWidget(QWidget):
         gas = self.gas_combo.currentText()
         cap = self.capacity_combo.currentText()
         qty = int(self.qty_spin.value())
-        # try to link to selected delivery row if any
-        gate_pass_id = None
-        delivery_row = self.deliveries_table.currentRow()
-        if delivery_row >= 0:
-            dp_gas = self.deliveries_table.item(delivery_row, 1).text()
-            dp_cap = self.deliveries_table.item(delivery_row, 2).text()
-            if dp_gas == gas and dp_cap == cap:
-                # hidden mapping via loading sequence; we need gate_pass_id via fetch again
-                deliveries = self.db_manager.get_client_deliveries_with_returns(client['id'])
-                if 0 <= delivery_row < len(deliveries):
-                    gate_pass_id = deliveries[delivery_row]['gate_pass_id']
-        if gate_pass_id is None:
-            gate_pass_id = self.db_manager.find_latest_gate_pass_for_product(client['id'], gas, cap)
         # validate remaining against summary
-        remaining = 0
+        purchased = returned = remaining = 0
         for i in range(self.summary_table.rowCount()):
             if self.summary_table.item(i, 0).text() == gas and self.summary_table.item(i, 2).text() == cap:
-                remaining = int(self.summary_table.item(i, 5).text())
+                purchased = int(self.summary_table.item(i, 3).text())
+                returned = int(self.summary_table.item(i, 4).text())
+                # Ensure returned does not exceed purchased
+                if returned > purchased:
+                    returned = purchased
+                remaining = purchased - returned
                 break
-        if qty > remaining and remaining > 0:
-            QMessageBox.warning(self, "Invalid Quantity", f"Return quantity {qty} exceeds remaining {remaining}.")
+        # Defensive: don't allow return more than what is remaining
+        if qty > remaining:
+            QMessageBox.warning(self, "Invalid Quantity", f"Return quantity {qty} exceeds pending {remaining}. Please ensure returned cylinders do not exceed purchased count.")
             return
-        self.db_manager.add_cylinder_return(client['id'], gas, cap, qty, gate_pass_id)
+        if qty < 1:
+            QMessageBox.warning(self, "Invalid Quantity", "Please enter return quantity at least 1.")
+            return
+        # record return (link to cylinder row)
+        self.db_manager.add_cylinder_return(client['id'], gas, cap, qty, None)
         QMessageBox.information(self, "Saved", "Cylinder return recorded.")
         self.load_summary()

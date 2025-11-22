@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QPushButton, QLineEdit, QLabel, 
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QComboBox, QSpinBox, QGroupBox, QTextEdit, QHeaderView,
-                               QDateTimeEdit, QCheckBox)
+                               QDateTimeEdit, QCheckBox, QSizePolicy)
 from PySide6.QtCore import Qt, QDateTime, QTimer
 from database_module import DatabaseManager
 from datetime import datetime
@@ -14,7 +14,8 @@ class GatePassDialog(QDialog):
         self.current_user = current_user
         self.gate_pass_data = gate_pass_data
         self.setWindowTitle("Create Gate Pass" if not gate_pass_data else "Edit Gate Pass" if self.is_editable() else "View Gate Pass")
-        self.setFixedSize(600, 500)
+        self.resize(720, 560)
+        self.setSizeGripEnabled(True)
         self.init_ui()
         
         if gate_pass_data:
@@ -53,6 +54,9 @@ class GatePassDialog(QDialog):
         # Form layout
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
+        form_layout.setLabelAlignment(Qt.AlignRight)
+        form_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         
         # Gate Pass Number (auto-generated)
         self.gate_pass_number_label = QLabel("Auto-generated")
@@ -62,6 +66,7 @@ class GatePassDialog(QDialog):
         self.receipt_search_input = QLineEdit()
         self.receipt_search_input.setPlaceholderText("Enter receipt number...")
         self.receipt_search_input.textChanged.connect(self.search_receipts)
+        self.receipt_search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Receipt # *:", self.receipt_search_input)
         
         # Receipt info
@@ -77,11 +82,13 @@ class GatePassDialog(QDialog):
         # Driver name
         self.driver_name_input = QLineEdit()
         self.driver_name_input.setPlaceholderText("Enter driver name")
+        self.driver_name_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Driver Name *:", self.driver_name_input)
         
         # Vehicle number
         self.vehicle_number_input = QLineEdit()
         self.vehicle_number_input.setPlaceholderText("Enter vehicle number (e.g., ABC-123)")
+        self.vehicle_number_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Vehicle Number *:", self.vehicle_number_input)
         
         # Gas type and capacity (auto-filled from receipt)
@@ -94,6 +101,7 @@ class GatePassDialog(QDialog):
         self.quantity_spinbox.setRange(1, 100)
         self.quantity_spinbox.setValue(1)
         self.quantity_spinbox.setMinimumWidth(120)
+        self.quantity_spinbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Quantity *:", self.quantity_spinbox)
         
         # Time out
@@ -101,12 +109,14 @@ class GatePassDialog(QDialog):
         self.time_out_datetime.setDateTime(QDateTime.currentDateTime())
         self.time_out_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
         self.time_out_datetime.setMinimumWidth(160)
+        self.time_out_datetime.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Time Out:", self.time_out_datetime)
         
         # Time in (for viewing/editing existing gate passes)
         self.time_in_datetime = QDateTimeEdit()
         self.time_in_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
         self.time_in_datetime.setMinimumWidth(160)
+        self.time_in_datetime.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.time_in_checkbox = QCheckBox("Mark as returned")
         self.time_in_checkbox.toggled.connect(self.on_time_in_toggled)
         
@@ -122,6 +132,7 @@ class GatePassDialog(QDialog):
         self.expected_in_datetime.setDisplayFormat("yyyy-MM-dd hh:mm")
         self.expected_in_datetime.setDateTime(QDateTime.currentDateTime())
         self.expected_in_datetime.setMinimumWidth(160)
+        self.expected_in_datetime.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         form_layout.addRow("Expected Return:", self.expected_in_datetime)
         
         # Gate operator

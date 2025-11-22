@@ -103,34 +103,35 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
     min-width: 650px;
     margin: 0 auto; 
     padding: 24px 35px; 
-    border: 1.5px solid #222; 
+    border: 2px solid #000; 
+    border-radius: 12px;
     background: #fff;
 }
 .header { 
-    text-align: left; 
     border-bottom: 2px solid #333; 
-    padding-bottom: 8px; 
+    padding: 6px 0 8px 0; 
     margin-bottom: 10px;
-    display: flex;
+    display: grid;
+    grid-template-columns: 160px 1fr;
     align-items: center;
 }
-.logo { height: 42px; width: auto; vertical-align: middle; margin-right: 18px; }
-.header-content { display: inline-block; vertical-align: middle; }
-.store-title { font-weight: 900; font-size: 28px; margin-bottom:2px;}
-.info { font-size: 13px; margin-top: 3px;}
-.meta-row { font-size: 13px; margin-top:6px; display:flex; justify-content:space-between; }
+.logo { width: 48px; height: 48px; border-radius: 50%; border: 1.5px solid #444; object-fit: cover; margin-right: 0; justify-self: start; }
+.header-content { display: inline-block; text-align: center; }
+.store-title { font-weight: 900; font-size: 28px; margin-bottom:2px; text-align: center;}
+.info { font-size: 13px; margin-top: 3px; text-align: center;}
+.meta-row { font-size: 13px; margin-top:6px; display:flex; justify-content:center; text-align:center; }
 .meta-row .label {font-weight: bold;}
 .title { text-align: center; font-size: 18px; font-weight: 700; margin: 14px 0 7px 0; text-decoration: underline;}
-.customer { font-size: 15px; margin: 8px 0 8px 0; }
-.tbl { width: 100%; border-collapse: collapse; margin: 8px 0 6px 0; font-size: 13px; background: #fff;}
+.customer { font-size: 15px; margin: 8px 0 8px 0; text-align: center; }
+.tbl { width: 100%; border-collapse: collapse; margin: 8px auto 6px auto; font-size: 13px; background: #fff;}
 .tbl th, .tbl td { border: 1px solid #344; padding: 5px 3px; text-align: center; font-size: 13px;}
-.totals { font-size: 14px; font-weight: 700; text-align: right; margin-top: 4px;}
+.totals { font-size: 14px; font-weight: 700; text-align: center; margin-top: 4px;}
 .bill-box { margin-top: 8px; }
 .box-label { font-weight:700; margin-right: 6px;}
-.bill-table { width: 100%; margin-bottom: 6px;}
+.bill-table { width: 100%; margin: 0 auto 6px auto;}
 .bill-table td { border: 1.5px solid #000; font-size: 15px; font-weight:700; padding: 4px 11px; text-align:center;}
 .footer { font-size: 13px; font-weight:600; text-align: center; border-top: 2px solid #444; padding-top: 9px; margin-top: 10px;}
-.signature { text-align:right; font-size:15px; font-style:italic; margin-top:13px;}
+.signature { text-align:center; font-size:15px; font-style:italic; margin-top:13px;}
         """
         style = style_a4_fit
         rows = "".join([
@@ -164,7 +165,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
 <body>
 <div class="receipt"> 
   <div class="header">
-    <img src="{logo_path}" class="logo" alt="Logo"/>
+    <img src="{logo_path}" class="logo" alt="Logo" width="48" height="48"/>
     <div class="header-content">
       <div class="store-title">RAJPUT GAS TRADERS</div>
       <div class="info">Prop: Saleem Ahmad | 0301-6465144</div>
@@ -264,6 +265,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
                 f"{self.receipt_data['total_amount']:,.0f}"
             ])
         items_table = Table(items_data, colWidths=[15*mm, 14*mm, 14*mm, 9*mm, 10*mm, 14*mm])
+        items_table.hAlign = 'CENTER'
         items_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -278,6 +280,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
             ["", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]
         ]
         totals_table = Table(totals_data, colWidths=[15*mm,14*mm,14*mm,9*mm,10*mm,14*mm])
+        totals_table.hAlign = 'CENTER'
         totals_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
@@ -290,6 +293,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         # Bill/Pending Box
         labels = [['Pending Bill', f"{self.receipt_data['balance']:,.0f}"], ['Total Bill', f"{self.receipt_data['total_amount']:,.0f}"]]
         bill_table = Table(labels, colWidths=[24*mm, 24*mm])
+        bill_table.hAlign = 'CENTER'
         bill_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
