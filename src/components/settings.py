@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QHeaderView, QCheckBox, QTextEdit, QComboBox)
 from PySide6.QtCore import Qt, QDateTime
 from database_module import DatabaseManager
-from backup import BackupManager
+from components.backup import BackupManager
 import os
 
 class SettingsWidget(QWidget):
