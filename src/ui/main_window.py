@@ -354,10 +354,7 @@ class MainWindow(QMainWindow):
         self.switch_page("dashboard")
     
     def get_time_based_greeting(self):
-        """Get time-based greeting"""
-        current_time = QTime.currentTime()
-        hour = current_time.hour()
-        
+        hour = QTime.currentTime().hour()
         if 5 <= hour < 12:
             return "Good morning"
         elif 12 <= hour < 17:
