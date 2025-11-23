@@ -256,21 +256,16 @@ class GasProductsWidget(QWidget):
                     background-color: #28a745;
                     color: white;
                     border: 1px solid #1e7e34;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     padding: 6px 12px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    min-width: 60px;
+                    font-size: 13px;
+                    font-weight: 600;
                 }
-                QPushButton:hover {
-                    background-color: #218838;
-                    border-color: #1e7e34;
-                }
-                QPushButton:pressed {
-                    background-color: #1e7e34;
-                    border-color: #155724;
-                }
+                QPushButton:hover { background-color: #218838; }
+                QPushButton:pressed { background-color: #1e7e34; }
             """)
+            edit_btn.setMinimumWidth(96)
+            edit_btn.setFixedHeight(32)
             edit_btn.clicked.connect(lambda checked, p=product: self.edit_product(p))
             actions_layout.addWidget(edit_btn)
             
@@ -281,21 +276,16 @@ class GasProductsWidget(QWidget):
                         background-color: #dc3545;
                         color: white;
                         border: 1px solid #bd2130;
-                        border-radius: 4px;
+                        border-radius: 6px;
                         padding: 6px 12px;
-                        font-size: 12px;
-                        font-weight: 500;
-                        min-width: 60px;
+                        font-size: 13px;
+                        font-weight: 600;
                     }
-                    QPushButton:hover {
-                        background-color: #c82333;
-                        border-color: #bd2130;
-                    }
-                    QPushButton:pressed {
-                        background-color: #bd2130;
-                        border-color: #721c24;
-                    }
+                    QPushButton:hover { background-color: #c82333; }
+                    QPushButton:pressed { background-color: #bd2130; }
                 """)
+                delete_btn.setMinimumWidth(96)
+                delete_btn.setFixedHeight(32)
                 delete_btn.clicked.connect(lambda checked, p=product: self.delete_product(p))
                 actions_layout.addWidget(delete_btn)
             

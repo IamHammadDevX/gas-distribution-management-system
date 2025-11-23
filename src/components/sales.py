@@ -89,10 +89,24 @@ class SalesWidget(QWidget):
         product_layout.addWidget(self.product_tax_spinbox)
 
         add_btn = QPushButton("Add to Cart")
+        add_btn.setStyleSheet(
+            "QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #218838; }"
+            "QPushButton:pressed { background-color: #1e7e34; }"
+        )
+        add_btn.setMinimumWidth(110)
+        add_btn.setFixedHeight(32)
         add_btn.clicked.connect(self.add_to_cart)
         product_layout.addWidget(add_btn)
 
         clear_btn = QPushButton("Clear")
+        clear_btn.setStyleSheet(
+            "QPushButton { background-color: #6c757d; color: white; border: 1px solid #5a6268; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #5a6268; }"
+            "QPushButton:pressed { background-color: #545b62; }"
+        )
+        clear_btn.setMinimumWidth(96)
+        clear_btn.setFixedHeight(32)
         clear_btn.clicked.connect(self.clear_form)
         product_layout.addWidget(clear_btn)
 
@@ -126,10 +140,31 @@ class SalesWidget(QWidget):
 
         cart_actions = QHBoxLayout()
         remove_btn = QPushButton("Remove Selected")
+        remove_btn.setStyleSheet(
+            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #c82333; }"
+            "QPushButton:pressed { background-color: #bd2130; }"
+        )
+        remove_btn.setMinimumWidth(140)
+        remove_btn.setFixedHeight(32)
         remove_btn.clicked.connect(self.remove_from_cart)
         clear_cart_btn = QPushButton("Clear Cart")
+        clear_cart_btn.setStyleSheet(
+            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #c82333; }"
+            "QPushButton:pressed { background-color: #bd2130; }"
+        )
+        clear_cart_btn.setMinimumWidth(110)
+        clear_cart_btn.setFixedHeight(32)
         clear_cart_btn.clicked.connect(self.clear_cart)
         clear_all_btn = QPushButton("Cancel Sale / Clear All")
+        clear_all_btn.setStyleSheet(
+            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #c82333; }"
+            "QPushButton:pressed { background-color: #bd2130; }"
+        )
+        clear_all_btn.setMinimumWidth(180)
+        clear_all_btn.setFixedHeight(32)
         clear_all_btn.clicked.connect(self.clear_all_sale)
         cart_actions.addWidget(remove_btn)
         cart_actions.addWidget(clear_cart_btn)
@@ -177,29 +212,32 @@ class SalesWidget(QWidget):
         self.balance_label.setFixedWidth(80)
         payment_layout.addWidget(self.balance_label)
         full_pay_btn = QPushButton("Full")
+        full_pay_btn.setStyleSheet(
+            "QPushButton { background-color: #007bff; color: white; border: 1px solid #0069d9; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #0069d9; }"
+            "QPushButton:pressed { background-color: #005cbf; }"
+        )
+        full_pay_btn.setMinimumWidth(80)
+        full_pay_btn.setFixedHeight(32)
         full_pay_btn.clicked.connect(self.set_full_payment)
         clear_pay_btn = QPushButton("Clear")
+        clear_pay_btn.setStyleSheet(
+            "QPushButton { background-color: #6c757d; color: white; border: 1px solid #5a6268; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #5a6268; }"
+            "QPushButton:pressed { background-color: #545b62; }"
+        )
+        clear_pay_btn.setMinimumWidth(80)
+        clear_pay_btn.setFixedHeight(32)
         clear_pay_btn.clicked.connect(self.clear_payment)
         complete_btn = QPushButton("Confirm")
-        complete_btn.clicked.connect(self.complete_sale)
-        btn_style = (
-            "QPushButton {"
-            " background-color: #2ecc71;"
-            " color: white;"
-            " border: 1px solid #27ae60;"
-            " border-radius: 6px;"
-            " padding: 6px 14px;"
-            " font-weight: 600;"
-            "}"
-            "QPushButton:hover { background-color: #27ae60; }"
-            "QPushButton:pressed { background-color: #1f8e4d; }"
+        complete_btn.setStyleSheet(
+            "QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #218838; }"
+            "QPushButton:pressed { background-color: #1e7e34; }"
         )
-        for b in (full_pay_btn, clear_pay_btn, complete_btn):
-            b.setStyleSheet(btn_style)
-            b.setMinimumWidth(96)
-            b.setFixedHeight(34)
         complete_btn.setMinimumWidth(110)
-        complete_btn.setMaximumWidth(120)
+        complete_btn.setFixedHeight(32)
+        complete_btn.clicked.connect(self.complete_sale)
         payment_layout.addStretch(1)
         payment_layout.addWidget(full_pay_btn)
         payment_layout.addWidget(clear_pay_btn)

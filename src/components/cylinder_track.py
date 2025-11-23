@@ -29,6 +29,13 @@ class CylinderTrackWidget(QWidget):
         bar.addWidget(self.client_combo)
 
         refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: 1px solid #2c81ba; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+            QPushButton:hover { background-color: #2c81ba; }
+            QPushButton:pressed { background-color: #256fa0; }
+        """)
+        refresh_btn.setMinimumWidth(96)
+        refresh_btn.setFixedHeight(32)
         refresh_btn.clicked.connect(self.load_summary)
         bar.addWidget(refresh_btn)
         layout.addLayout(bar)
@@ -56,6 +63,13 @@ class CylinderTrackWidget(QWidget):
         self.qty_spin = QSpinBox()
         self.qty_spin.setRange(1, 1000)
         save_btn = QPushButton("Save Return")
+        save_btn.setStyleSheet("""
+            QPushButton { background-color: #27ae60; color: white; border: 1px solid #229954; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+            QPushButton:hover { background-color: #229954; }
+            QPushButton:pressed { background-color: #1e8449; }
+        """)
+        save_btn.setMinimumWidth(120)
+        save_btn.setFixedHeight(32)
         save_btn.clicked.connect(self.save_return)
 
         e_layout.addWidget(QLabel("Gas"))
@@ -106,6 +120,13 @@ class CylinderTrackWidget(QWidget):
             self.summary_table.setItem(i, 5, status_item)
             # Quick return button cell (for simple UI)
             btn = QPushButton("Return" if remaining > 0 else "Done")
+            btn.setStyleSheet("""
+                QPushButton { background-color: #8e44ad; color: white; border: 1px solid #7d3c98; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
+                QPushButton:hover { background-color: #7d3c98; }
+                QPushButton:pressed { background-color: #6c3483; }
+            """)
+            btn.setMinimumWidth(80)
+            btn.setFixedHeight(26)
             btn.setEnabled(remaining > 0)
             btn.clicked.connect(lambda _, gi=i: self.start_return_from_row(gi))
             self.summary_table.setCellWidget(i, 6, btn)

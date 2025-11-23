@@ -696,14 +696,35 @@ class ReceiptsWidget(QWidget):
             actions_layout.setContentsMargins(5, 5, 5, 5)
             
             view_btn = QPushButton("View")
+            view_btn.setStyleSheet("""
+                QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                QPushButton:hover { background-color: #138496; }
+                QPushButton:pressed { background-color: #117a8b; }
+            """)
+            view_btn.setMinimumWidth(96)
+            view_btn.setFixedHeight(32)
             view_btn.clicked.connect(lambda checked, r=receipt: self.view_receipt(r))
             actions_layout.addWidget(view_btn)
-            
+
             print_btn = QPushButton("Print")
+            print_btn.setStyleSheet("""
+                QPushButton { background-color: #f39c12; color: white; border: 1px solid #d68910; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                QPushButton:hover { background-color: #d68910; }
+                QPushButton:pressed { background-color: #b9770e; }
+            """)
+            print_btn.setMinimumWidth(96)
+            print_btn.setFixedHeight(32)
             print_btn.clicked.connect(lambda checked, r=receipt: self.print_receipt(r))
             actions_layout.addWidget(print_btn)
-            
+
             export_btn = QPushButton("Export PDF")
+            export_btn.setStyleSheet("""
+                QPushButton { background-color: #2c3e50; color: white; border: 1px solid #1f2d3a; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                QPushButton:hover { background-color: #1f2d3a; }
+                QPushButton:pressed { background-color: #16222c; }
+            """)
+            export_btn.setMinimumWidth(110)
+            export_btn.setFixedHeight(32)
             export_btn.clicked.connect(lambda checked, r=receipt: self.export_receipt_pdf(r))
             actions_layout.addWidget(export_btn)
             

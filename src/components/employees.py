@@ -252,21 +252,16 @@ class EmployeesWidget(QWidget):
                     background-color: #17a2b8;
                     color: white;
                     border: 1px solid #138496;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     padding: 6px 12px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    min-width: 60px;
+                    font-size: 13px;
+                    font-weight: 600;
                 }
-                QPushButton:hover {
-                    background-color: #138496;
-                    border-color: #117a8b;
-                }
-                QPushButton:pressed {
-                    background-color: #117a8b;
-                    border-color: #0c5460;
-                }
+                QPushButton:hover { background-color: #138496; }
+                QPushButton:pressed { background-color: #117a8b; }
             """)
+            view_btn.setMinimumWidth(96)
+            view_btn.setFixedHeight(32)
             view_btn.clicked.connect(lambda checked, e=employee: self.view_employee(e))
             actions_layout.addWidget(view_btn)
             
@@ -277,21 +272,16 @@ class EmployeesWidget(QWidget):
                         background-color: #28a745;
                         color: white;
                         border: 1px solid #1e7e34;
-                        border-radius: 4px;
+                        border-radius: 6px;
                         padding: 6px 12px;
-                        font-size: 12px;
-                        font-weight: 500;
-                        min-width: 60px;
+                        font-size: 13px;
+                        font-weight: 600;
                     }
-                    QPushButton:hover {
-                        background-color: #218838;
-                        border-color: #1e7e34;
-                    }
-                    QPushButton:pressed {
-                        background-color: #1e7e34;
-                        border-color: #155724;
-                    }
+                    QPushButton:hover { background-color: #218838; }
+                    QPushButton:pressed { background-color: #1e7e34; }
                 """)
+                edit_btn.setMinimumWidth(96)
+                edit_btn.setFixedHeight(32)
                 edit_btn.clicked.connect(lambda checked, e=employee: self.edit_employee(e))
                 actions_layout.addWidget(edit_btn)
                 
@@ -301,21 +291,16 @@ class EmployeesWidget(QWidget):
                         background-color: #dc3545;
                         color: white;
                         border: 1px solid #bd2130;
-                        border-radius: 4px;
+                        border-radius: 6px;
                         padding: 6px 12px;
-                        font-size: 12px;
-                        font-weight: 500;
-                        min-width: 60px;
+                        font-size: 13px;
+                        font-weight: 600;
                     }
-                    QPushButton:hover {
-                        background-color: #c82333;
-                        border-color: #bd2130;
-                    }
-                    QPushButton:pressed {
-                        background-color: #bd2130;
-                        border-color: #721c24;
-                    }
+                    QPushButton:hover { background-color: #c82333; }
+                    QPushButton:pressed { background-color: #bd2130; }
                 """)
+                delete_btn.setMinimumWidth(96)
+                delete_btn.setFixedHeight(32)
                 delete_btn.clicked.connect(lambda checked, e=employee: self.delete_employee(e))
                 actions_layout.addWidget(delete_btn)
             
