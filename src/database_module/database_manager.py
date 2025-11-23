@@ -374,11 +374,27 @@ class DatabaseManager:
                                           vehicle_number, gas_type, capacity, quantity, gate_operator_id, expected_time_in))
 
     def add_cylinder_return(self, client_id: int, gas_type: str, capacity: str, quantity: int, gate_pass_id: Optional[int] = None) -> int:
+        if quantity is None or int(quantity) < 0:
+            raise ValueError("Return quantity cannot be negative")
+        qty = int(quantity)
+        delivered_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
+        returned_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
+        delivered = int(delivered_rows[0]['total']) if delivered_rows else 0
+        returned = int(returned_rows[0]['total']) if returned_rows else 0
+        remaining = delivered - returned
+        if qty > remaining:
+            raise ValueError(f"Return quantity {qty} exceeds pending {remaining}")
         query = '''
             INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity)
             VALUES (?, ?, ?, ?, ?)
         '''
-        return self.execute_update(query, (gate_pass_id, client_id, gas_type, capacity, quantity))
+        return self.execute_update(query, (gate_pass_id, client_id, gas_type, capacity, qty))
 
     def get_cylinder_summary_for_client(self, client_id: int):
         deliveries = self.execute_query('''

@@ -23,7 +23,7 @@ class SalesWidget(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
 
         title_label = QLabel("Sales & Billing")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 26px; font-weight: bold; color: #205087; margin-bottom: 7px;")
         layout.addWidget(title_label)
 
         clients_layout = QHBoxLayout()
@@ -34,26 +34,31 @@ class SalesWidget(QWidget):
         clients_layout.addWidget(self.client_search_input)
 
         self.client_combo = QComboBox()
+        self.client_combo.setMinimumWidth(300)
         self.client_combo.currentIndexChanged.connect(self.on_client_selected)
         clients_layout.addWidget(self.client_combo)
 
         layout.addLayout(clients_layout)
 
         self.client_info_label = QLabel("No client selected")
-        self.client_info_label.setStyleSheet("font-size: 13px; color: #555;")
+        self.client_info_label.setStyleSheet("font-size: 14px; color: #555; margin-bottom:6px;")
         layout.addWidget(self.client_info_label)
 
+        # Product Line Entry (Easy UI with tax and discount per product)
         product_layout = QHBoxLayout()
         product_layout.setSpacing(10)
 
         self.gas_product_combo = QComboBox()
+        self.gas_product_combo.setMinimumWidth(220)
         self.gas_product_combo.currentIndexChanged.connect(self.on_product_selected)
+        product_layout.addWidget(QLabel("Product:"))
         product_layout.addWidget(self.gas_product_combo)
 
         self.quantity_spinbox = QSpinBox()
         self.quantity_spinbox.setRange(1, 1000)
         self.quantity_spinbox.setValue(1)
         self.quantity_spinbox.valueChanged.connect(self.calculate_totals)
+        product_layout.addWidget(QLabel("Qty:"))
         product_layout.addWidget(self.quantity_spinbox)
 
         self.unit_price_spinbox = QDoubleSpinBox()
@@ -62,55 +67,58 @@ class SalesWidget(QWidget):
         self.unit_price_spinbox.setPrefix("Rs. ")
         self.unit_price_spinbox.setSingleStep(100)
         self.unit_price_spinbox.valueChanged.connect(self.calculate_totals)
+        product_layout.addWidget(QLabel("Unit Price:"))
         product_layout.addWidget(self.unit_price_spinbox)
 
         self.line_discount_spinbox = QDoubleSpinBox()
         self.line_discount_spinbox.setRange(0, 100000000)
         self.line_discount_spinbox.setDecimals(2)
-        self.line_discount_spinbox.setPrefix("Disc Rs. ")
+        self.line_discount_spinbox.setPrefix("Rs. ")
         self.line_discount_spinbox.setSingleStep(50)
         self.line_discount_spinbox.valueChanged.connect(self.calculate_totals)
+        product_layout.addWidget(QLabel("Discount:"))
         product_layout.addWidget(self.line_discount_spinbox)
+
+        self.product_tax_spinbox = QDoubleSpinBox()
+        self.product_tax_spinbox.setRange(0.0, 100.0)
+        self.product_tax_spinbox.setDecimals(2)
+        self.product_tax_spinbox.setSuffix(" %")
+        self.product_tax_spinbox.setSingleStep(0.5)
+        self.product_tax_spinbox.valueChanged.connect(self.calculate_totals)
+        product_layout.addWidget(QLabel("Tax rate:"))
+        product_layout.addWidget(self.product_tax_spinbox)
 
         add_btn = QPushButton("Add to Cart")
         add_btn.clicked.connect(self.add_to_cart)
         product_layout.addWidget(add_btn)
 
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(self.clear_form)
+        product_layout.addWidget(clear_btn)
+
         layout.addLayout(product_layout)
 
+        # Totals for the current line (product about-to-add)
         totals_layout = QHBoxLayout()
-        totals_layout.setSpacing(20)
-        self.apply_tax_checkbox = QCheckBox("Apply Tax")
-        self.apply_tax_checkbox.setChecked(False)
-        self.apply_tax_checkbox.toggled.connect(self.on_tax_settings_changed)
-        self.tax_rate_spinbox = QDoubleSpinBox()
-        self.tax_rate_spinbox.setRange(0.0, 100.0)
-        self.tax_rate_spinbox.setDecimals(2)
-        self.tax_rate_spinbox.setSuffix(" %")
-        self.tax_rate_spinbox.setSingleStep(0.5)
-        self.tax_rate_spinbox.setEnabled(False)
-        self.tax_rate_spinbox.valueChanged.connect(self.on_tax_settings_changed)
+        totals_layout.setSpacing(12)
         self.subtotal_label = QLabel("Rs. 0.00")
         self.tax_label = QLabel("Rs. 0.00")
         self.total_label = QLabel("Rs. 0.00")
         self.subtotal_label.setStyleSheet("font-weight: bold;")
         self.tax_label.setStyleSheet("font-weight: bold;")
         self.total_label.setStyleSheet("font-weight: bold;")
-        totals_layout.addWidget(self.apply_tax_checkbox)
-        totals_layout.addWidget(QLabel("Tax %:"))
-        totals_layout.addWidget(self.tax_rate_spinbox)
-        totals_layout.addWidget(QLabel("Subtotal:"))
+        totals_layout.addWidget(QLabel("Line Subtotal:"))
         totals_layout.addWidget(self.subtotal_label)
         totals_layout.addWidget(QLabel("Tax:"))
         totals_layout.addWidget(self.tax_label)
-        totals_layout.addWidget(QLabel("Total:"))
+        totals_layout.addWidget(QLabel("Line Total:"))
         totals_layout.addWidget(self.total_label)
         layout.addLayout(totals_layout)
 
         self.cart_table = QTableWidget()
-        self.cart_table.setColumnCount(7)
+        self.cart_table.setColumnCount(8)
         self.cart_table.setHorizontalHeaderLabels([
-            "Product", "Quantity", "Unit Price", "Discount", "Subtotal", "Tax", "Total"
+            "Product", "Quantity", "Unit Price", "Discount", "Tax (%)", "Subtotal", "Tax", "Total"
         ])
         self.cart_table.setAlternatingRowColors(True)
         self.cart_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -119,41 +127,80 @@ class SalesWidget(QWidget):
         cart_actions = QHBoxLayout()
         remove_btn = QPushButton("Remove Selected")
         remove_btn.clicked.connect(self.remove_from_cart)
-        clear_btn = QPushButton("Clear Cart")
-        clear_btn.clicked.connect(self.clear_cart)
+        clear_cart_btn = QPushButton("Clear Cart")
+        clear_cart_btn.clicked.connect(self.clear_cart)
+        clear_all_btn = QPushButton("Cancel Sale / Clear All")
+        clear_all_btn.clicked.connect(self.clear_all_sale)
         cart_actions.addWidget(remove_btn)
-        cart_actions.addWidget(clear_btn)
+        cart_actions.addWidget(clear_cart_btn)
+        cart_actions.addWidget(clear_all_btn)
         layout.addLayout(cart_actions)
 
         payment_layout = QHBoxLayout()
-        payment_layout.setSpacing(20)
+        payment_layout.setSpacing(18)
         self.cart_total_label = QLabel("Rs. 0.00")
+        self.cart_tax_label = QLabel("Rs. 0.00")
         self.overall_discount_spinbox = QDoubleSpinBox()
         self.overall_discount_spinbox.setRange(0, 100000000)
         self.overall_discount_spinbox.setDecimals(2)
-        self.overall_discount_spinbox.setPrefix("Disc Rs. ")
+        self.overall_discount_spinbox.setPrefix("Rs. ")
         self.overall_discount_spinbox.valueChanged.connect(self.calculate_balance)
+        self.overall_discount_spinbox.setFixedWidth(110)
         self.amount_paid_spinbox = QDoubleSpinBox()
         self.amount_paid_spinbox.setRange(0, 100000000)
         self.amount_paid_spinbox.setDecimals(2)
         self.amount_paid_spinbox.setPrefix("Rs. ")
         self.amount_paid_spinbox.valueChanged.connect(self.calculate_balance)
+        self.amount_paid_spinbox.setFixedWidth(110)
         self.balance_label = QLabel("Rs. 0.00")
         self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
-        payment_layout.addWidget(QLabel("Cart Total:"))
+        lbl_cart_total = QLabel("Cart Total:")
+        lbl_cart_tax = QLabel("Cart Tax:")
+        lbl_overall_disc = QLabel("Overall Disc:")
+        lbl_amount_paid = QLabel("Amount Paid:")
+        lbl_balance = QLabel("Balance:")
+        for lbl in (lbl_cart_total, lbl_cart_tax, lbl_overall_disc, lbl_amount_paid, lbl_balance):
+            lbl.setStyleSheet("padding-right:6px;")
+        payment_layout.addWidget(lbl_cart_total)
         payment_layout.addWidget(self.cart_total_label)
-        payment_layout.addWidget(QLabel("Overall Discount:"))
+        payment_layout.addSpacing(12)
+        payment_layout.addWidget(lbl_cart_tax)
+        payment_layout.addWidget(self.cart_tax_label)
+        payment_layout.addSpacing(12)
+        payment_layout.addWidget(lbl_overall_disc)
         payment_layout.addWidget(self.overall_discount_spinbox)
-        payment_layout.addWidget(QLabel("Amount Paid:"))
+        payment_layout.addSpacing(12)
+        payment_layout.addWidget(lbl_amount_paid)
         payment_layout.addWidget(self.amount_paid_spinbox)
-        payment_layout.addWidget(QLabel("Balance:"))
+        payment_layout.addSpacing(12)
+        payment_layout.addWidget(lbl_balance)
+        self.balance_label.setFixedWidth(80)
         payment_layout.addWidget(self.balance_label)
-        full_pay_btn = QPushButton("Pay Full")
+        full_pay_btn = QPushButton("Full")
         full_pay_btn.clicked.connect(self.set_full_payment)
         clear_pay_btn = QPushButton("Clear")
         clear_pay_btn.clicked.connect(self.clear_payment)
         complete_btn = QPushButton("Confirm")
         complete_btn.clicked.connect(self.complete_sale)
+        btn_style = (
+            "QPushButton {"
+            " background-color: #2ecc71;"
+            " color: white;"
+            " border: 1px solid #27ae60;"
+            " border-radius: 6px;"
+            " padding: 6px 14px;"
+            " font-weight: 600;"
+            "}"
+            "QPushButton:hover { background-color: #27ae60; }"
+            "QPushButton:pressed { background-color: #1f8e4d; }"
+        )
+        for b in (full_pay_btn, clear_pay_btn, complete_btn):
+            b.setStyleSheet(btn_style)
+            b.setMinimumWidth(96)
+            b.setFixedHeight(34)
+        complete_btn.setMinimumWidth(110)
+        complete_btn.setMaximumWidth(120)
+        payment_layout.addStretch(1)
         payment_layout.addWidget(full_pay_btn)
         payment_layout.addWidget(clear_pay_btn)
         payment_layout.addWidget(complete_btn)
@@ -213,16 +260,12 @@ class SalesWidget(QWidget):
         unit_price = self.unit_price_spinbox.value()
         line_discount = self.line_discount_spinbox.value()
         subtotal = max(0.0, quantity * unit_price - line_discount)
-        tax_rate = (self.tax_rate_spinbox.value() / 100.0) if self.apply_tax_checkbox.isChecked() else 0.0
-        tax = subtotal * tax_rate
+        tax_rate = self.product_tax_spinbox.value() / 100.0
+        tax = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0.00
         total = subtotal + tax
         self.subtotal_label.setText(f"Rs. {subtotal:,.2f}")
         self.tax_label.setText(f"Rs. {tax:,.2f}")
         self.total_label.setText(f"Rs. {total:,.2f}")
-        if self.amount_paid_spinbox.value() == 0 and self.current_products:
-            cart_total = sum(item['total'] for item in self.current_products)
-            self.amount_paid_spinbox.setValue(cart_total)
-        self.calculate_balance()
 
     def calculate_balance(self):
         self.recalc_cart_totals()
@@ -241,29 +284,21 @@ class SalesWidget(QWidget):
         else:
             self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
         self.cart_total_label.setText(f"Rs. {total_after_discount:,.2f}")
-        quantity = self.quantity_spinbox.value()
-        unit_price = self.unit_price_spinbox.value()
-        line_discount = self.line_discount_spinbox.value()
-        current_subtotal = max(0.0, quantity * unit_price - line_discount)
-        tax_rate = (self.tax_rate_spinbox.value() / 100.0) if self.apply_tax_checkbox.isChecked() else 0.0
-        current_tax = current_subtotal * tax_rate
-        current_total = current_subtotal + current_tax
-        self.subtotal_label.setText(f"Rs. {current_subtotal:,.2f}")
-        self.tax_label.setText(f"Rs. {current_tax:,.2f}")
-        self.total_label.setText(f"Rs. {current_total:,.2f}")
-
-    def on_tax_settings_changed(self):
-        self.tax_rate_spinbox.setEnabled(self.apply_tax_checkbox.isChecked())
-        self.recalc_cart_totals()
-        self.update_cart_table()
-        self.calculate_balance()
+        self.cart_tax_label.setText(f"Rs. {total_tax:,.2f}")
 
     def recalc_cart_totals(self):
-        tax_rate = (self.tax_rate_spinbox.value() / 100.0) if self.apply_tax_checkbox.isChecked() else 0.0
         for item in self.current_products:
-            subtotal = item['subtotal']
-            item['tax'] = subtotal * tax_rate
-            item['total'] = subtotal + item['tax']
+            # Each product uses its own tax rate and discount!
+            quantity = item['quantity']
+            unit_price = item['unit_price']
+            discount = item.get('discount', 0.0)
+            subtotal = max(0.0, quantity * unit_price - discount)
+            tax_rate = item.get('tax_rate', 0.0)
+            tax = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0.00
+            total = subtotal + tax
+            item['subtotal'] = subtotal
+            item['tax'] = tax
+            item['total'] = total
 
     def add_to_cart(self):
         if not self.current_client:
@@ -283,15 +318,16 @@ class SalesWidget(QWidget):
             return
         product = self.gas_product_combo.itemData(index)
         line_discount = self.line_discount_spinbox.value()
+        tax_rate = self.product_tax_spinbox.value() / 100.0
         subtotal = max(0.0, quantity * unit_price - line_discount)
-        tax_rate = (self.tax_rate_spinbox.value() / 100.0) if self.apply_tax_checkbox.isChecked() else 0.0
-        tax = subtotal * tax_rate
+        tax = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0.00
         total = subtotal + tax
         cart_item = {
             'product': product,
             'quantity': quantity,
             'unit_price': unit_price,
             'discount': line_discount,
+            'tax_rate': tax_rate,
             'subtotal': subtotal,
             'tax': tax,
             'total': total
@@ -299,6 +335,7 @@ class SalesWidget(QWidget):
         self.current_products.append(cart_item)
         self.update_cart_table()
         self.clear_form()
+        self.calculate_balance()
         QMessageBox.information(self, "Success", "Product added to cart!")
 
     def update_cart_table(self):
@@ -306,22 +343,24 @@ class SalesWidget(QWidget):
         for row, item in enumerate(self.current_products):
             product = item['product']
             product_text = f"{product['gas_type']}"
-            if product['sub_type']:
+            if product.get('sub_type'):
                 product_text += f" - {product['sub_type']}"
             product_text += f" - {product['capacity']}"
             self.cart_table.setItem(row, 0, QTableWidgetItem(product_text))
             self.cart_table.setItem(row, 1, QTableWidgetItem(str(item['quantity'])))
             self.cart_table.setItem(row, 2, QTableWidgetItem(f"Rs. {item['unit_price']:,.2f}"))
             self.cart_table.setItem(row, 3, QTableWidgetItem(f"Rs. {item.get('discount', 0.0):,.2f}"))
-            self.cart_table.setItem(row, 4, QTableWidgetItem(f"Rs. {item['subtotal']:,.2f}"))
-            self.cart_table.setItem(row, 5, QTableWidgetItem(f"Rs. {item['tax']:,.2f}"))
-            self.cart_table.setItem(row, 6, QTableWidgetItem(f"Rs. {item['total']:,.2f}"))
+            self.cart_table.setItem(row, 4, QTableWidgetItem(f"{item['tax_rate']*100:.2f} %"))
+            self.cart_table.setItem(row, 5, QTableWidgetItem(f"Rs. {item['subtotal']:,.2f}"))
+            self.cart_table.setItem(row, 6, QTableWidgetItem(f"Rs. {item['tax']:,.2f}"))
+            self.cart_table.setItem(row, 7, QTableWidgetItem(f"Rs. {item['total']:,.2f}"))
 
     def remove_from_cart(self):
         current_row = self.cart_table.currentRow()
         if current_row >= 0:
             self.current_products.pop(current_row)
             self.update_cart_table()
+            self.calculate_balance()
             QMessageBox.information(self, "Success", "Item removed from cart!")
         else:
             QMessageBox.warning(self, "No Selection", "Please select an item to remove.")
@@ -329,14 +368,40 @@ class SalesWidget(QWidget):
     def clear_cart(self):
         self.current_products.clear()
         self.update_cart_table()
-        self.cart_total_label.setText("Rs. 0.00")
         self.calculate_balance()
 
     def clear_form(self):
         self.quantity_spinbox.setValue(1)
         self.line_discount_spinbox.setValue(0)
+        self.unit_price_spinbox.setValue(0)
+        self.product_tax_spinbox.setValue(0.00)
+        self.overall_discount_spinbox.setValue(0)
         self.amount_paid_spinbox.setValue(0)
         self.calculate_totals()
+
+    def clear_all_sale(self):
+        self.current_products.clear()
+        self.update_cart_table()
+        self.client_combo.setCurrentIndex(-1)
+        self.current_client = None
+        self.client_info_label.setText("No client selected")
+        self.client_search_input.clear()
+        self.quantity_spinbox.setValue(1)
+        self.unit_price_spinbox.setValue(0)
+        self.line_discount_spinbox.setValue(0)
+        self.product_tax_spinbox.setValue(0.00)
+        self.overall_discount_spinbox.setValue(0)
+        self.amount_paid_spinbox.setValue(0)
+        self.subtotal_label.setText("Rs. 0.00")
+        self.tax_label.setText("Rs. 0.00")
+        self.total_label.setText("Rs. 0.00")
+        self.cart_total_label.setText("Rs. 0.00")
+        self.cart_tax_label.setText("Rs. 0.00")
+        self.balance_label.setText("Rs. 0.00")
+        self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
+        self.gas_product_combo.setCurrentIndex(-1)
+        self.calculate_totals()
+        self.calculate_balance()
 
     def set_full_payment(self):
         if not self.current_products:
@@ -349,6 +414,7 @@ class SalesWidget(QWidget):
 
     def clear_payment(self):
         self.amount_paid_spinbox.setValue(0)
+        self.calculate_balance()
 
     def complete_sale(self):
         if not self.current_client:
@@ -489,7 +555,7 @@ class SalesWidget(QWidget):
                 self.recent_sales_table.setItem(row, 0, QTableWidgetItem(sale['created_at'][:16]))
                 self.recent_sales_table.setItem(row, 1, QTableWidgetItem(sale['client_name']))
                 product_text = f"{sale['gas_type']}"
-                if sale['sub_type']:
+                if sale.get('sub_type'):
                     product_text += f" - {sale['sub_type']}"
                 product_text += f" - {sale['capacity']}"
                 self.recent_sales_table.setItem(row, 2, QTableWidgetItem(product_text))
@@ -608,7 +674,7 @@ class SalesWidget(QWidget):
             self.gas_product_combo.clear()
             for product in products:
                 product_text = f"{product['gas_type']}"
-                if product['sub_type']:
+                if product.get('sub_type'):
                     product_text += f" - {product['sub_type']}"
                 product_text += f" - {product['capacity']}"
                 self.gas_product_combo.addItem(product_text, product)

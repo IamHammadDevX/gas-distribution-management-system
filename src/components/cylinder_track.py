@@ -154,6 +154,9 @@ class CylinderTrackWidget(QWidget):
             QMessageBox.warning(self, "Invalid Quantity", "Please enter return quantity at least 1.")
             return
         # record return (link to cylinder row)
-        self.db_manager.add_cylinder_return(client['id'], gas, cap, qty, None)
-        QMessageBox.information(self, "Saved", "Cylinder return recorded.")
-        self.load_summary()
+        try:
+            self.db_manager.add_cylinder_return(client['id'], gas, cap, qty, None)
+            QMessageBox.information(self, "Saved", "Cylinder return recorded.")
+            self.load_summary()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
