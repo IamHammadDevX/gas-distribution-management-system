@@ -141,7 +141,45 @@ class DatabaseManager:
                     FOREIGN KEY (client_id) REFERENCES clients (id)
                 )
             ''')
-            # Weekly billing removed
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS weekly_invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_number TEXT UNIQUE NOT NULL,
+                    client_id INTEGER NOT NULL,
+                    week_start DATE NOT NULL,
+                    week_end DATE NOT NULL,
+                    total_cylinders INTEGER DEFAULT 0,
+                    subtotal DECIMAL(10,2) DEFAULT 0,
+                    discount DECIMAL(10,2) DEFAULT 0,
+                    tax_amount DECIMAL(10,2) DEFAULT 0,
+                    total_payable DECIMAL(10,2) DEFAULT 0,
+                    previous_balance DECIMAL(10,2) DEFAULT 0,
+                    final_payable DECIMAL(10,2) DEFAULT 0,
+                    amount_paid DECIMAL(10,2) DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'UNPAID' CHECK(status IN ('PAID','UNPAID')),
+                    receipt_number TEXT,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    FOREIGN KEY (client_id) REFERENCES clients (id),
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS weekly_payments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    weekly_invoice_id INTEGER NOT NULL,
+                    client_id INTEGER NOT NULL,
+                    amount DECIMAL(10,2) NOT NULL,
+                    payment_date DATE NOT NULL,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (weekly_invoice_id) REFERENCES weekly_invoices (id),
+                    FOREIGN KEY (client_id) REFERENCES clients (id),
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            ''')
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS employees (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,6 +229,8 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_weekly_invoices_client_week ON weekly_invoices (client_id, week_start, week_end)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_weekly_payments_invoice ON weekly_payments (weekly_invoice_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)')
             cursor.execute('SELECT COUNT(*) FROM users WHERE role = "Admin"')
             if cursor.fetchone()[0] == 0:
@@ -338,6 +378,16 @@ class DatabaseManager:
         count = result[0]['COUNT(*) + 1'] if result else 1
         return f"RCP-{datetime.now().year}-{str(count).zfill(6)}"
 
+    def get_next_weekly_invoice_number(self) -> str:
+        rows = self.execute_query('SELECT COUNT(*) + 1 AS n FROM weekly_invoices')
+        n = rows[0]['n'] if rows else 1
+        return f"WEEK-{datetime.now().year}-{str(n).zfill(6)}"
+
+    def get_next_weekly_receipt_number(self) -> str:
+        rows = self.execute_query('SELECT COUNT(*) + 1 AS n FROM weekly_invoices WHERE receipt_number IS NOT NULL')
+        n = rows[0]['n'] if rows else 1
+        return f"WRCP-{datetime.now().year}-{str(n).zfill(6)}"
+
     def get_sale_items(self, sale_id: int) -> List[Dict]:
         items = self.execute_query('''
             SELECT si.created_at, si.quantity, si.unit_price, si.total_amount, si.subtotal, si.tax_amount,
@@ -420,6 +470,170 @@ class DatabaseManager:
             LIMIT {int(limit)}
         '''
         return self.execute_query(query, params)
+
+    def compute_weekly_summary_for_client(self, client_id: int, week_start: str, week_end: str) -> Dict[str, Any]:
+        params = (client_id, week_start, week_end)
+        rows = self.execute_query('''
+            SELECT 
+                COALESCE(SUM(si.quantity),0) AS total_cylinders,
+                COALESCE(SUM(si.quantity * si.unit_price),0) AS gross_total,
+                COALESCE(SUM(si.subtotal),0) AS subtotal,
+                COALESCE(SUM(si.tax_amount),0) AS tax_amount,
+                COALESCE(SUM(si.total_amount),0) AS total_payable
+            FROM sale_items si
+            JOIN sales s ON si.sale_id = s.id
+            WHERE s.client_id = ? AND DATE(s.created_at) BETWEEN ? AND ?
+        ''', params)
+        if rows and (rows[0]['total_cylinders'] or rows[0]['subtotal'] or rows[0]['total_payable']):
+            total_cylinders = int(rows[0]['total_cylinders'])
+            gross_total = float(rows[0]['gross_total'])
+            subtotal = float(rows[0]['subtotal'])
+            tax_amount = float(rows[0]['tax_amount'])
+            total_payable = float(rows[0]['total_payable'])
+        else:
+            rows2 = self.execute_query('''
+                SELECT 
+                    COALESCE(SUM(s.quantity),0) AS total_cylinders,
+                    COALESCE(SUM(s.quantity * s.unit_price),0) AS gross_total,
+                    COALESCE(SUM(s.subtotal),0) AS subtotal,
+                    COALESCE(SUM(s.tax_amount),0) AS tax_amount,
+                    COALESCE(SUM(s.total_amount),0) AS total_payable
+                FROM sales s
+                WHERE s.client_id = ? AND DATE(s.created_at) BETWEEN ? AND ?
+            ''', params)
+            total_cylinders = int(rows2[0]['total_cylinders']) if rows2 else 0
+            gross_total = float(rows2[0]['gross_total']) if rows2 else 0.0
+            subtotal = float(rows2[0]['subtotal']) if rows2 else 0.0
+            tax_amount = float(rows2[0]['tax_amount']) if rows2 else 0.0
+            total_payable = float(rows2[0]['total_payable']) if rows2 else 0.0
+        discount = max(0.0, gross_total - subtotal)
+        prev_rows = self.execute_query('''
+            SELECT COALESCE(SUM(balance),0) AS prev_balance
+            FROM sales
+            WHERE client_id = ? AND DATE(created_at) < ?
+        ''', (client_id, week_start))
+        previous_balance = float(prev_rows[0]['prev_balance']) if prev_rows else 0.0
+        final_payable = previous_balance + total_payable
+        pay_rows = self.execute_query('''
+            SELECT COALESCE(SUM(amount),0) AS paid
+            FROM weekly_payments
+            WHERE client_id = ? AND weekly_invoice_id IN (
+                SELECT id FROM weekly_invoices WHERE client_id = ? AND week_start = ? AND week_end = ?
+            )
+        ''', (client_id, client_id, week_start, week_end))
+        amount_paid = float(pay_rows[0]['paid']) if pay_rows else 0.0
+        status = 'PAID' if amount_paid >= final_payable and final_payable > 0 else 'UNPAID'
+        return {
+            'total_cylinders': total_cylinders,
+            'subtotal': round(subtotal, 2),
+            'discount': round(discount, 2),
+            'tax_amount': round(tax_amount, 2),
+            'total_payable': round(total_payable, 2),
+            'previous_balance': round(previous_balance, 2),
+            'final_payable': round(final_payable, 2),
+            'amount_paid': round(amount_paid, 2),
+            'status': status
+        }
+
+    def upsert_weekly_invoice(self, client_id: int, week_start: str, week_end: str, created_by: Optional[int] = None) -> int:
+        summary = self.compute_weekly_summary_for_client(client_id, week_start, week_end)
+        rows = self.execute_query('''
+            SELECT id FROM weekly_invoices WHERE client_id = ? AND week_start = ? AND week_end = ?
+        ''', (client_id, week_start, week_end))
+        receipt_number = None
+        if summary['final_payable'] > 0:
+            existing = self.execute_query('''
+                SELECT receipt_number FROM weekly_invoices WHERE client_id = ? AND week_start = ? AND week_end = ? AND receipt_number IS NOT NULL
+            ''', (client_id, week_start, week_end))
+            receipt_number = existing[0]['receipt_number'] if existing else self.get_next_weekly_receipt_number()
+        if rows:
+            self.execute_update('''
+                UPDATE weekly_invoices
+                SET total_cylinders = ?, subtotal = ?, discount = ?, tax_amount = ?, total_payable = ?, previous_balance = ?, final_payable = ?, updated_at = CURRENT_TIMESTAMP, amount_paid = ?, status = ?, receipt_number = COALESCE(receipt_number, ?)
+                WHERE id = ?
+            ''', (
+                summary['total_cylinders'], summary['subtotal'], summary['discount'], summary['tax_amount'], summary['total_payable'], summary['previous_balance'], summary['final_payable'], summary['amount_paid'], summary['status'], receipt_number, rows[0]['id']
+            ))
+            return rows[0]['id']
+        invoice_number = self.get_next_weekly_invoice_number()
+        return self.execute_update('''
+            INSERT INTO weekly_invoices (invoice_number, client_id, week_start, week_end, total_cylinders, subtotal, discount, tax_amount, total_payable, previous_balance, final_payable, amount_paid, status, receipt_number, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            invoice_number, client_id, week_start, week_end, summary['total_cylinders'], summary['subtotal'], summary['discount'], summary['tax_amount'], summary['total_payable'], summary['previous_balance'], summary['final_payable'], summary['amount_paid'], summary['status'], receipt_number, created_by
+        ))
+
+    def get_weekly_invoices(self, week_start: str, week_end: str) -> List[Dict]:
+        return self.execute_query('''
+            SELECT wi.*, c.name AS client_name, c.phone AS client_phone, c.company AS client_company
+            FROM weekly_invoices wi
+            JOIN clients c ON wi.client_id = c.id
+            WHERE wi.week_start = ? AND wi.week_end = ?
+            ORDER BY c.name
+        ''', (week_start, week_end))
+
+    def record_weekly_payment(self, weekly_invoice_id: int, amount: float, payment_date: str, created_by: Optional[int] = None) -> int:
+        inv_rows = self.execute_query('SELECT id, client_id, final_payable, amount_paid, status, week_start, week_end FROM weekly_invoices WHERE id = ?', (weekly_invoice_id,))
+        if not inv_rows:
+            raise ValueError('Weekly invoice not found')
+        inv = inv_rows[0]
+        if amount is None or float(amount) < 0:
+            raise ValueError('Payment amount cannot be negative')
+        remaining = float(inv['final_payable']) - float(inv['amount_paid'])
+        if float(amount) > max(0.0, remaining):
+            raise ValueError('Payment exceeds remaining balance')
+        pid = self.execute_update('''
+            INSERT INTO weekly_payments (weekly_invoice_id, client_id, amount, payment_date, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (weekly_invoice_id, inv['client_id'], float(amount), payment_date, created_by))
+        new_paid = float(inv['amount_paid']) + float(amount)
+        new_status = 'PAID' if new_paid >= float(inv['final_payable']) and float(inv['final_payable']) > 0 else 'UNPAID'
+        self.execute_update('UPDATE weekly_invoices SET amount_paid = ?, status = ?, updated_at = CURRENT_TIMESTAMP, paid_at = CASE WHEN ? = "PAID" THEN CURRENT_TIMESTAMP ELSE paid_at END WHERE id = ?', (new_paid, new_status, new_status, weekly_invoice_id))
+        self.apply_weekly_payment_to_sales(weekly_invoice_id, float(amount), created_by)
+        return pid
+
+    def apply_weekly_payment_to_sales(self, weekly_invoice_id: int, amount: float, created_by: Optional[int]):
+        inv_rows = self.execute_query('SELECT client_id, week_start, week_end FROM weekly_invoices WHERE id = ?', (weekly_invoice_id,))
+        if not inv_rows:
+            return
+        client_id = inv_rows[0]['client_id']
+        ws = inv_rows[0]['week_start']
+        we = inv_rows[0]['week_end']
+        rows = self.execute_query('''
+            SELECT id, total_amount, amount_paid
+            FROM sales
+            WHERE client_id = ? AND (total_amount - amount_paid) > 0
+            ORDER BY created_at ASC
+        ''', (client_id,))
+        remaining_amount = float(amount)
+        for s in rows:
+            if remaining_amount <= 0:
+                break
+            sale_remaining = float(s['total_amount']) - float(s['amount_paid'])
+            if sale_remaining <= 0:
+                continue
+            pay_now = min(remaining_amount, sale_remaining)
+            new_paid = float(s['amount_paid']) + pay_now
+            self.update_sale_payment(s['id'], new_paid)
+            balance = float(s['total_amount']) - new_paid
+            receipt_number = self.get_next_receipt_number()
+            if created_by is None:
+                created_by_val = 1
+            else:
+                created_by_val = created_by
+            self.create_receipt(receipt_number, s['id'], client_id, float(s['total_amount']), new_paid, balance, created_by_val)
+            remaining_amount -= pay_now
+
+    def mark_weekly_invoice_paid(self, weekly_invoice_id: int) -> bool:
+        inv_rows = self.execute_query('SELECT id, final_payable, amount_paid, status FROM weekly_invoices WHERE id = ?', (weekly_invoice_id,))
+        if not inv_rows:
+            return False
+        inv = inv_rows[0]
+        remaining = float(inv['final_payable']) - float(inv['amount_paid'])
+        if remaining != 0:
+            raise ValueError('Remaining balance is not zero')
+        updated = self.execute_update('UPDATE weekly_invoices SET status = "PAID", paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (weekly_invoice_id,))
+        return updated > 0
 
     def get_recent_sales_with_summaries(self, limit: int = 20) -> List[Dict]:
         query = f'''

@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
             ("Receipts", "receipts"),
             ("Daily Transactions", "daily_transactions"),
             ("Cylinder Track", "cylinder_track"),
+            ("Weekly Payments", "weekly_payments"),
             ("Vehicle Expenses", "vehicle_expenses"),
             ("Gate Passes", "gate_passes"),
             ("Employees", "employees"),
@@ -332,7 +333,10 @@ class MainWindow(QMainWindow):
         self.widgets["gate_passes"] = gate_passes_widget
         self.content_area.addWidget(gate_passes_widget)
 
-        # Weekly Billing removed
+        from components.weekly_payments import WeeklyPaymentsWidget
+        weekly_widget = WeeklyPaymentsWidget(self.db_manager, self.current_user)
+        self.widgets["weekly_payments"] = weekly_widget
+        self.content_area.addWidget(weekly_widget)
         
         # Employees widget
         employees_widget = EmployeesWidget(self.db_manager, self.current_user)
