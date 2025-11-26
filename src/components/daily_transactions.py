@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout
 from database_module import DatabaseManager
 
 class DailyTransactionsWidget(QWidget):
@@ -128,14 +129,16 @@ class DailyTransactionsWidget(QWidget):
 
     def print_daily_report(self):
         printer = QPrinter(QPrinter.HighResolution)
+        printer.setPageSize(QPageSize(QPageSize.A4))
+        printer.setPageOrientation(QPageLayout.Portrait)
+        printer.setResolution(300)
         dialog = QPrintDialog(printer, self)
         if dialog.exec():
-            from PySide6.QtGui import QTextDocument
             d = self.date_edit.date().toString('yyyy-MM-dd')
             html = [
-                f"<h2 style='text-align:center;'>Daily Transactions - {d}</h2>",
-                "<h3>Sales</h3>",
-                "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:12px;'>",
+                f"<h2 style='text-align:center; font-size:16pt;'>Daily Transactions - {d}</h2>",
+                "<h3 style='font-size:12pt;'>Sales</h3>",
+                "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
                 "<tr><th>Date</th><th>Client</th><th>Product</th><th>Qty</th><th>Total</th><th>Paid</th><th>Balance</th><th>Cashier</th></tr>"
             ]
             for i in range(self.sales_table.rowCount()):
@@ -144,7 +147,7 @@ class DailyTransactionsWidget(QWidget):
                     item = self.sales_table.item(i, j)
                     row.append(item.text() if item else "")
                 html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
-            html.extend(["</table>", "<h3>Gate Activity</h3>", "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:12px;'>",
+            html.extend(["</table>", "<h3 style='font-size:12pt;'>Gate Activity</h3>", "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
                          "<tr><th>Gate Pass #</th><th>Client</th><th>Driver</th><th>Vehicle</th><th>Gas</th><th>Capacity</th><th>Out</th><th>In</th></tr>"])
             for i in range(self.gate_table.rowCount()):
                 row = []
@@ -154,5 +157,7 @@ class DailyTransactionsWidget(QWidget):
                 html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
             html.append("</table>")
             doc = QTextDocument()
+            doc.setDefaultFont(QFont("Arial", 10))
             doc.setHtml("".join(html))
+            doc.setPageSize(printer.pageRect(QPrinter.Point).size())
             doc.print_(printer)
