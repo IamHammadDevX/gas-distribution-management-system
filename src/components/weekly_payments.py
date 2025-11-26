@@ -9,10 +9,11 @@ class WeeklyClientReceiptDialog(QDialog):
         super().__init__(parent)
         self.invoice = invoice_row
         self.setWindowTitle(f"Weekly Receipt - {invoice_row.get('receipt_number') or invoice_row.get('invoice_number')}")
-        self.setFixedSize(720, 840)
+        self.setFixedSize(600, 540)
         layout = QVBoxLayout(self)
         preview = QTextEdit()
         preview.setReadOnly(True)
+        preview.setMinimumHeight(500)
         preview.setHtml(self.generate_html())
         layout.addWidget(preview)
         bar = QHBoxLayout()
@@ -53,14 +54,14 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
 <div class='page'>
   <div class='header'>
     <div style='display:flex; align-items:center; justify-content:center; gap:12px;'>
-      <img src='logo.png' alt='Logo' style='width:48px; height:48px; border:1.5px solid #444; border-radius:50%; object-fit:cover;' />
+      <img src='logo.png' alt='Logo' width='32' height='32' style='border:1.5px solid #444; border-radius:50%;' />
       <div>
-        <div style='font-size:26px; font-weight:900;'>RAJPUT GAS TRADERS</div>
-        <div class='meta'>Prop: Saleem Ahmad | 0301-6465144</div>
+        <div style='font-size:22px; font-weight:900;'>RAJPUT GAS TRADERS</div>
+        <div class='meta' style='font-size:12px;'>Prop: Saleem Ahmad | 0301-6465144</div>
       </div>
     </div>
-    <div class='meta'>Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>
-    <div class='meta'><span class='label'>Week:</span> {ws} to {we} &nbsp;&nbsp; <span class='label'>Ref:</span> {ref} &nbsp;&nbsp; <span class='label'>Status:</span> {status}</div>
+    <div class='meta' style='font-size:12px;'>Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>
+    <div class='meta' style='font-size:12px;'><span class='label'>Week:</span> {ws} to {we} &nbsp;&nbsp; <span class='label'>Ref:</span> {ref} &nbsp;&nbsp; <span class='label'>Status:</span> {status}</div>
   </div>
   <div class='title'>WEEKLY BILL</div>
   <div style='text-align:center; font-size:15px;'><b>CUSTOMER :</b> {self.invoice['client_name']}</div>
@@ -160,6 +161,7 @@ class WeeklyPaymentsWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setColumnWidth(10, 360)
         g_layout.addWidget(self.table)
         layout.addWidget(group)
 
@@ -210,12 +212,40 @@ class WeeklyPaymentsWidget(QWidget):
             h.setContentsMargins(5, 5, 5, 5)
             h.setSpacing(6)
             btn_print = QPushButton("Print Client Details")
+            btn_print.setStyleSheet(
+                """
+                QPushButton { background-color: #f39c12; color: white; border: 1px solid #d68910; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 700; }
+                QPushButton:hover { background-color: #d68910; }
+                QPushButton:pressed { background-color: #b9770e; }
+                """
+            )
+            btn_print.setMinimumWidth(160)
+            btn_print.setFixedHeight(40)
             btn_print.clicked.connect(lambda checked=False, row=r: self.print_client(row))
             h.addWidget(btn_print)
             btn_pay = QPushButton("Record Payment")
+            btn_pay.setStyleSheet(
+                """
+                QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 700; }
+                QPushButton:hover { background-color: #218838; }
+                QPushButton:pressed { background-color: #1e7e34; }
+                """
+            )
+            btn_pay.setMinimumWidth(160)
+            btn_pay.setFixedHeight(40)
             btn_pay.clicked.connect(lambda checked=False, row=r: self.record_payment(row))
             h.addWidget(btn_pay)
             btn_mark = QPushButton("Mark as PAID")
+            btn_mark.setStyleSheet(
+                """
+                QPushButton { background-color: #3498db; color: white; border: 1px solid #2c81ba; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 700; }
+                QPushButton:hover { background-color: #2c81ba; }
+                QPushButton:pressed { background-color: #256fa0; }
+                QPushButton:disabled { background-color: #95a5a6; color: #ecf0f1; border-color: #7f8c8d; }
+                """
+            )
+            btn_mark.setMinimumWidth(160)
+            btn_mark.setFixedHeight(40)
             btn_mark.setEnabled(max(0.0, float(r['final_payable']) - float(r['amount_paid'])) == 0.0 and r['status'] != 'PAID')
             btn_mark.clicked.connect(lambda checked=False, row=r: self.mark_paid(row))
             h.addWidget(btn_mark)
