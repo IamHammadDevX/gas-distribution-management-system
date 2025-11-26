@@ -141,27 +141,7 @@ class DatabaseManager:
                     FOREIGN KEY (client_id) REFERENCES clients (id)
                 )
             ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS weekly_cycles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER NOT NULL,
-                    week_start DATE NOT NULL,
-                    week_end DATE NOT NULL,
-                    total_qty INTEGER DEFAULT 0,
-                    subtotal DECIMAL(10,2) DEFAULT 0,
-                    tax_amount DECIMAL(10,2) DEFAULT 0,
-                    total_amount DECIMAL(10,2) DEFAULT 0,
-                    previous_balance DECIMAL(10,2) DEFAULT 0,
-                    payable_amount DECIMAL(10,2) DEFAULT 0,
-                    amount_paid DECIMAL(10,2) DEFAULT 0,
-                    payment_date TIMESTAMP,
-                    status TEXT DEFAULT 'UNPAID',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(client_id, week_start, week_end),
-                    FOREIGN KEY (client_id) REFERENCES clients (id)
-                )
-            ''')
+            # Weekly billing removed
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS employees (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -469,153 +449,17 @@ class DatabaseManager:
         '''
         return self.execute_query(query)
 
-    def get_week_bounds(self, ref_date: Optional[datetime] = None) -> tuple:
-        ref = ref_date or datetime.now()
-        # Week runs Saturday (start) to Friday (end)
-        # Python: Monday=0 ... Sunday=6. We need Saturday=5, Friday=4 relative to start.
-        weekday = ref.weekday()
-        # Compute days to previous Saturday
-        days_since_saturday = (weekday - 5) % 7
-        week_start = (ref - timedelta(days=days_since_saturday)).date()
-        week_end = (week_start + timedelta(days=6))
-        return (week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d'))
+    # Weekly billing removed
 
-    def compute_weekly_totals_for_client(self, client_id: int, week_start: str, week_end: str) -> Dict:
-        sales = self.execute_query('''
-            SELECT id, created_at FROM sales 
-            WHERE client_id = ? AND DATE(created_at) BETWEEN ? AND ?
-            ORDER BY created_at ASC
-        ''', (client_id, week_start, week_end))
-        total_qty = 0
-        subtotal = 0.0
-        tax_amount = 0.0
-        total_amount = 0.0
-        for s in sales:
-            items = self.get_sale_items(s['id'])
-            # Sum items; if fallback row, it still returns with s fields
-            for it in items:
-                try:
-                    total_qty += int(it['quantity'])
-                    subtotal += float(it['subtotal'])
-                    tax_amount += float(it['tax_amount'])
-                    total_amount += float(it['total_amount'])
-                except Exception:
-                    pass
-        prev_balance_rows = self.execute_query('''
-            SELECT COALESCE(SUM(balance),0) as prev_balance
-            FROM sales WHERE client_id = ? AND DATE(created_at) < ?
-        ''', (client_id, week_start))
-        previous_balance = float(prev_balance_rows[0]['prev_balance']) if prev_balance_rows else 0.0
-        payable_amount = previous_balance + total_amount
-        return {
-            'total_qty': int(total_qty),
-            'subtotal': float(subtotal),
-            'tax_amount': float(tax_amount),
-            'total_amount': float(total_amount),
-            'previous_balance': float(previous_balance),
-            'payable_amount': float(payable_amount)
-        }
+    # Weekly billing removed
 
-    def upsert_weekly_cycle(self, client_id: int, week_start: str, week_end: str) -> Dict:
-        data = self.compute_weekly_totals_for_client(client_id, week_start, week_end)
-        # Check existing
-        existing = self.execute_query('''
-            SELECT * FROM weekly_cycles WHERE client_id = ? AND week_start = ? AND week_end = ?
-        ''', (client_id, week_start, week_end))
-        if existing:
-            self.execute_update('''
-                UPDATE weekly_cycles
-                SET total_qty = ?, subtotal = ?, tax_amount = ?, total_amount = ?,
-                    previous_balance = ?, payable_amount = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE client_id = ? AND week_start = ? AND week_end = ?
-            ''', (
-                data['total_qty'], data['subtotal'], data['tax_amount'], data['total_amount'],
-                data['previous_balance'], data['payable_amount'], client_id, week_start, week_end
-            ))
-        else:
-            self.execute_update('''
-                INSERT INTO weekly_cycles (client_id, week_start, week_end, total_qty, subtotal, tax_amount,
-                    total_amount, previous_balance, payable_amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                client_id, week_start, week_end, data['total_qty'], data['subtotal'], data['tax_amount'],
-                data['total_amount'], data['previous_balance'], data['payable_amount']
-            ))
-        # Return current state
-        row = self.execute_query('''
-            SELECT * FROM weekly_cycles WHERE client_id = ? AND week_start = ? AND week_end = ?
-        ''', (client_id, week_start, week_end))
-        return row[0] if row else {**data, 'amount_paid': 0.0, 'status': 'UNPAID'}
+    # Weekly billing removed
 
-    def apply_payment_across_sales(self, client_id: int, up_to_day: str, amount: float) -> float:
-        remaining = float(amount)
-        if remaining <= 0:
-            return 0.0
-        sales = self.execute_query('''
-            SELECT id, amount_paid, balance FROM sales
-            WHERE client_id = ? AND DATE(created_at) <= ? AND balance > 0
-            ORDER BY created_at ASC
-        ''', (client_id, up_to_day))
-        for s in sales:
-            if remaining <= 0:
-                break
-            bal = float(s['balance'])
-            if bal <= 0:
-                continue
-            pay = min(bal, remaining)
-            new_paid = float(s['amount_paid']) + pay
-            new_balance = bal - pay
-            self.execute_update('UPDATE sales SET amount_paid = ?, balance = ? WHERE id = ?', (new_paid, new_balance, s['id']))
-            remaining -= pay
-        # Update client totals
-        self.update_client_balance(client_id)
-        applied = float(amount) - remaining
-        return applied
+    # Weekly billing removed
 
-    def record_weekly_payment(self, client_id: int, week_start: str, week_end: str, amount: float, user_id: Optional[int] = None) -> Dict:
-        # Restrict to Thursday (3) or Friday (4). Python weekday: Monday=0
-        today = datetime.now()
-        if today.weekday() not in (3, 4):
-            raise Exception('Payments are allowed only on Thursday or Friday.')
-        # Validate against remaining payable to prevent overpayment
-        cycle = self.upsert_weekly_cycle(client_id, week_start, week_end)
-        remaining = float(cycle['payable_amount']) - float(cycle.get('amount_paid') or 0.0)
-        if amount > remaining + 1e-6:
-            raise Exception('Payment cannot exceed remaining payable amount.')
-        # Apply to sales up to week_end
-        applied = self.apply_payment_across_sales(client_id, week_end, amount)
-        # Update weekly cycle payment and status
-        new_paid = float(cycle.get('amount_paid') or 0.0) + applied
-        status = 'PAID' if new_paid >= float(cycle['payable_amount']) - 0.0001 else 'UNPAID'
-        self.execute_update('''
-            UPDATE weekly_cycles
-            SET amount_paid = ?, payment_date = CURRENT_TIMESTAMP, status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE client_id = ? AND week_start = ? AND week_end = ?
-        ''', (new_paid, status, client_id, week_start, week_end))
-        self.log_activity('WEEKLY_PAYMENT', f"Client {client_id} paid {applied:.2f} for week {week_start} to {week_end}", user_id)
-        row = self.execute_query('SELECT * FROM weekly_cycles WHERE client_id = ? AND week_start = ? AND week_end = ?', (client_id, week_start, week_end))
-        return row[0] if row else {}
+    # Weekly billing removed
 
-    def get_weekly_billing_report(self, week_start: str, week_end: str) -> List[Dict]:
-        clients = self.get_clients()
-        report = []
-        for c in clients:
-            cyc = self.upsert_weekly_cycle(c['id'], week_start, week_end)
-            report.append({
-                'client_id': c['id'],
-                'client_name': c['name'],
-                'phone': c['phone'],
-                'company': c.get('company') or '',
-                'total_qty': int(cyc.get('total_qty') or 0),
-                'subtotal': float(cyc.get('subtotal') or 0.0),
-                'tax_amount': float(cyc.get('tax_amount') or 0.0),
-                'total_amount': float(cyc.get('total_amount') or 0.0),
-                'previous_balance': float(cyc.get('previous_balance') or 0.0),
-                'payable_amount': float(cyc.get('payable_amount') or 0.0),
-                'amount_paid': float(cyc.get('amount_paid') or 0.0),
-                'status': cyc.get('status') or 'UNPAID'
-            })
-        return report
+    # Weekly billing removed
 
     def get_client_purchases_with_summaries(self, client_id: int, limit: int = 10) -> List[Dict]:
         query = f'''
