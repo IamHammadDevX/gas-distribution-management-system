@@ -132,7 +132,7 @@ class SalesWidget(QWidget):
         self.cart_table = QTableWidget()
         self.cart_table.setColumnCount(8)
         self.cart_table.setHorizontalHeaderLabels([
-            "Product", "Quantity", "Unit Price", "Discount", "Tax (%)", "Subtotal", "Tax", "Total"
+            "Products", "Quantity", "Unit Price", "Discount", "Tax (%)", "Subtotal", "Tax", "Total"
         ])
         self.cart_table.setAlternatingRowColors(True)
         self.cart_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -247,7 +247,7 @@ class SalesWidget(QWidget):
         self.recent_sales_table = QTableWidget()
         self.recent_sales_table.setColumnCount(8)
         self.recent_sales_table.setHorizontalHeaderLabels([
-            "Date", "Client", "Product", "Quantity", "Total", "Paid", "Balance", "Actions"
+            "Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Actions"
         ])
         self.recent_sales_table.setAlternatingRowColors(True)
         self.recent_sales_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -578,26 +578,13 @@ class SalesWidget(QWidget):
 
     def load_recent_sales(self):
         try:
-            query = '''
-                SELECT s.*, c.name as client_name, c.phone as client_phone,
-                       gp.gas_type, gp.sub_type, gp.capacity
-                FROM sales s
-                JOIN clients c ON s.client_id = c.id
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                ORDER BY s.created_at DESC
-                LIMIT 20
-            '''
-            sales = self.db_manager.execute_query(query)
+            sales = self.db_manager.get_recent_sales_with_summaries(limit=20)
             self.recent_sales_table.setRowCount(len(sales))
             for row, sale in enumerate(sales):
                 self.recent_sales_table.setItem(row, 0, QTableWidgetItem(sale['created_at'][:16]))
                 self.recent_sales_table.setItem(row, 1, QTableWidgetItem(sale['client_name']))
-                product_text = f"{sale['gas_type']}"
-                if sale.get('sub_type'):
-                    product_text += f" - {sale['sub_type']}"
-                product_text += f" - {sale['capacity']}"
-                self.recent_sales_table.setItem(row, 2, QTableWidgetItem(product_text))
-                self.recent_sales_table.setItem(row, 3, QTableWidgetItem(str(sale['quantity'])))
+                self.recent_sales_table.setItem(row, 2, QTableWidgetItem(sale.get('product_summary') or ''))
+                self.recent_sales_table.setItem(row, 3, QTableWidgetItem(sale.get('quantities_summary') or str(sale.get('quantity') or '')))
                 self.recent_sales_table.setItem(row, 4, QTableWidgetItem(f"Rs. {sale['total_amount']:,.2f}"))
                 self.recent_sales_table.setItem(row, 5, QTableWidgetItem(f"Rs. {sale['amount_paid']:,.2f}"))
                 self.recent_sales_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['balance']:,.2f}"))

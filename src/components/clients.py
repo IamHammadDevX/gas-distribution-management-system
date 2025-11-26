@@ -380,7 +380,7 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
         purchases_table = QTableWidget()
         purchases_table.setColumnCount(6)
         purchases_table.setHorizontalHeaderLabels([
-            "Date", "Gas Type", "Quantity", "Unit Price", "Total", "Balance"
+            "Date", "Products", "Quantities", "Unit Price", "Total", "Balance"
         ])
         purchases_table.setAlternatingRowColors(True)
         purchases_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -388,22 +388,13 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
         
         # Load recent purchases for this client
         try:
-            query = '''
-                SELECT s.created_at, gp.gas_type, gp.capacity, s.quantity, 
-                       s.unit_price, s.total_amount, s.balance
-                FROM sales s
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                WHERE s.client_id = ?
-                ORDER BY s.created_at DESC
-                LIMIT 10
-            '''
-            purchases = self.db_manager.execute_query(query, (client['id'],))
+            purchases = self.db_manager.get_client_purchases_with_summaries(client['id'], limit=10)
             
             purchases_table.setRowCount(len(purchases))
             for row, purchase in enumerate(purchases):
                 purchases_table.setItem(row, 0, QTableWidgetItem(purchase['created_at'][:10]))
-                purchases_table.setItem(row, 1, QTableWidgetItem(f"{purchase['gas_type']} - {purchase['capacity']}"))
-                purchases_table.setItem(row, 2, QTableWidgetItem(str(purchase['quantity'])))
+                purchases_table.setItem(row, 1, QTableWidgetItem(purchase.get('product_summary') or ''))
+                purchases_table.setItem(row, 2, QTableWidgetItem(purchase.get('quantities_summary') or str(purchase.get('quantity') or '')))
                 purchases_table.setItem(row, 3, QTableWidgetItem(f"Rs. {purchase['unit_price']:,.2f}"))
                 purchases_table.setItem(row, 4, QTableWidgetItem(f"Rs. {purchase['total_amount']:,.2f}"))
                 purchases_table.setItem(row, 5, QTableWidgetItem(f"Rs. {purchase['balance']:,.2f}"))

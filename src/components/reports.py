@@ -189,7 +189,7 @@ Number of Transactions: {len(sales)}
         # Populate table
         self.report_table.setColumnCount(8)
         self.report_table.setHorizontalHeaderLabels([
-            "Date", "Client", "Product", "Quantity", "Unit Price", "Subtotal", "Tax", "Total"
+            "Date", "Client", "Products", "Quantities", "Unit Price", "Subtotal", "Tax", "Total"
         ])
         
         self.report_table.setRowCount(len(sales))
@@ -198,10 +198,8 @@ Number of Transactions: {len(sales)}
             self.report_table.setItem(row, 0, QTableWidgetItem(sale['created_at'][:16]))
             self.report_table.setItem(row, 1, QTableWidgetItem(sale['client_name']))
             
-            product_text = f"{sale['gas_type']} - {sale['capacity']}"
-            self.report_table.setItem(row, 2, QTableWidgetItem(product_text))
-            
-            self.report_table.setItem(row, 3, QTableWidgetItem(str(sale['quantity'])))
+            self.report_table.setItem(row, 2, QTableWidgetItem(sale.get('product_summary') or ''))
+            self.report_table.setItem(row, 3, QTableWidgetItem(sale.get('quantities_summary') or str(sale.get('quantity') or '')))
             self.report_table.setItem(row, 4, QTableWidgetItem(f"Rs. {sale['unit_price']:,.2f}"))
             self.report_table.setItem(row, 5, QTableWidgetItem(f"Rs. {sale['subtotal']:,.2f}"))
             self.report_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['tax_amount']:,.2f}"))

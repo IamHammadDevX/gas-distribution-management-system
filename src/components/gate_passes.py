@@ -160,19 +160,8 @@ class GatePassDialog(QDialog):
             return
         
         try:
-            query = '''
-                SELECT r.*, c.name as client_name, c.phone as client_phone,
-                       gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.total_amount
-                FROM receipts r
-                JOIN clients c ON r.client_id = c.id
-                JOIN sales s ON r.sale_id = s.id
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                WHERE LOWER(r.receipt_number) LIKE ? AND r.balance = 0
-                ORDER BY r.created_at DESC
-                LIMIT 10
-            '''
-            search_pattern = f"%{search_text.lower()}%"
-            receipts = self.db_manager.execute_query(query, (search_pattern,))
+            receipts = self.db_manager.get_receipts_with_summaries(limit=10, search=search_text)
+            receipts = [r for r in receipts if int(r.get('balance') or 0) == 0]
             
             if receipts:
                 self.current_receipt = receipts[0]
@@ -198,11 +187,9 @@ class GatePassDialog(QDialog):
             client_info += f"\nPhone: {self.current_receipt['client_phone']}"
             self.client_info_label.setText(client_info)
             
-            gas_info = f"Type: {self.current_receipt['gas_type']}"
-            if self.current_receipt['sub_type']:
-                gas_info += f" - {self.current_receipt['sub_type']}"
-            gas_info += f"\nCapacity: {self.current_receipt['capacity']}"
-            gas_info += f"\nQuantity: {self.current_receipt['quantity']}"
+            products = self.current_receipt.get('product_summary') or ''
+            quantities = self.current_receipt.get('quantities_summary') or str(self.current_receipt.get('quantity') or '')
+            gas_info = f"Products: {products}\nQuantities: {quantities}"
             self.gas_info_label.setText(gas_info)
     
     def load_gate_pass_data(self):
@@ -212,16 +199,7 @@ class GatePassDialog(QDialog):
             
             # Load receipt info
             try:
-                query = '''
-                    SELECT r.*, c.name as client_name, c.phone as client_phone,
-                           gp.gas_type, gp.sub_type, gp.capacity, s.quantity
-                    FROM receipts r
-                    JOIN clients c ON r.client_id = c.id
-                    JOIN sales s ON r.sale_id = s.id
-                    JOIN gas_products gp ON s.gas_product_id = gp.id
-                    WHERE r.id = ?
-                '''
-                result = self.db_manager.execute_query(query, (self.gate_pass_data['receipt_id'],))
+                result = self.db_manager.execute_query('SELECT r.*, c.name as client_name, c.phone as client_phone FROM receipts r JOIN clients c ON r.client_id = c.id WHERE r.id = ?', (self.gate_pass_data['receipt_id'],))
                 
                 if result:
                     self.current_receipt = result[0]

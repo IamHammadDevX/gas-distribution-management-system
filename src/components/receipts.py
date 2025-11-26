@@ -97,13 +97,14 @@ class ReceiptDialog(QDialog):
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
         total_tax_val = sum(float(i['tax_amount']) for i in items) if items else float(self.receipt_data.get('tax_amount', 0) or 0)
+        sum_subtotal = sum(float(i['subtotal']) for i in items) if items else float(self.receipt_data.get('subtotal', 0) or 0)
         pre_discount_total = sum(float(i['total_amount']) for i in items) if items else (float(self.receipt_data.get('subtotal', 0) or 0) + float(self.receipt_data.get('tax_amount', 0) or 0))
         overall_discount_val = max(0.0, pre_discount_total - float(self.receipt_data.get('total_amount', 0) or 0))
         bill_extra_rows = ""
         if total_tax_val > 0:
-            bill_extra_rows += f"<tr><td class=\"box-label\">Tax</td><td>{total_tax_val:,.0f}</td></tr>"
+            bill_extra_rows += f"<tr><td class=\"box-label\">Tax</td><td>{total_tax_val:,.2f}</td></tr>"
         if overall_discount_val > 0:
-            bill_extra_rows += f"<tr><td class=\"box-label\">Order Discount</td><td>{overall_discount_val:,.0f}</td></tr>"
+            bill_extra_rows += f"<tr><td class=\"box-label\">Order Discount</td><td>{overall_discount_val:,.2f}</td></tr>"
         style_a4_fit = """
 body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0; }
 .receipt { 
@@ -142,36 +143,29 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
 .signature { text-align:center; font-size:15px; font-style:italic; margin-top:13px;}
         """
         style = style_a4_fit
-        rows = "".join([
-            (
-                lambda it: (
-                    f"<tr>"
-                    f"<td>{(it.get('created_at') or self.receipt_data['created_at'])[:10]}</td>"
-                    f"<td>{it['gas_type']}</td>"
-                    f"<td>{it['sub_type'] or ''} {it['capacity']}</td>"
-                    f"<td>{it['quantity']}</td>"
-                    f"<td>{float(it['unit_price']):,.0f}</td>"
-                    f"<td>{max(0.0, float(it['quantity']) * float(it['unit_price']) - float(it['subtotal'])):,.0f}</td>"
-                    f"<td>{float(it['tax_amount']):,.0f}</td>"
-                    f"<td>{float(it['total_amount']):,.0f}</td>"
-                    f"</tr>"
+        rows_parts = []
+        if for_print:
+            for it in items:
+                prod = f"{it['gas_type']}{(' ' + it['sub_type']) if it.get('sub_type') else ''} {it['capacity']}".strip()
+                disc = max(0.0, float(it['quantity']) * float(it['unit_price']) - float(it['subtotal']))
+                rows_parts.append(
+                    f"<tr><td>{str(it['created_at'])[:10]}</td><td>{prod}</td><td>{it['quantity']}</td><td>{disc:,.2f}</td><td>{float(it['subtotal']):,.2f}</td><td>{float(it['tax_amount']):,.2f}</td><td>{float(it['total_amount']):,.2f}</td></tr>"
                 )
-            )(item)
-            for item in items
-        ])
-        if not rows:
-            rows = (
+        else:
+            summaries = self.db_manager.get_sale_item_summaries(self.receipt_data['sale_id'])
+            products_text = summaries.get('product_summary') or (f"{self.receipt_data.get('gas_type','')} {self.receipt_data.get('capacity','')}".strip())
+            quantities_text = summaries.get('quantities_summary') or str(self.receipt_data.get('quantity') or '')
+            rows_parts.append(
                 f"<tr>"
                 f"<td>{self.receipt_data['created_at'][:10]}</td>"
-                f"<td>{self.receipt_data['gas_type']}</td>"
-                f"<td>{self.receipt_data['capacity']}</td>"
-                f"<td>{self.receipt_data['quantity']}</td>"
-                f"<td>{float(self.receipt_data['unit_price']):,.0f}</td>"
-                f"<td>{max(0.0, float(self.receipt_data.get('quantity', 0) or 0) * float(self.receipt_data.get('unit_price', 0) or 0) - float(self.receipt_data.get('subtotal', 0) or 0)):,.0f}</td>"
-                f"<td>{float(self.receipt_data.get('tax_amount', 0) or 0):,.0f}</td>"
+                f"<td>{products_text}</td>"
+                f"<td>{quantities_text}</td>"
+                f"<td>{sum_subtotal:,.0f}</td>"
+                f"<td>{total_tax_val:,.0f}</td>"
                 f"<td>{float(self.receipt_data['total_amount']):,.0f}</td>"
                 f"</tr>"
             )
+        rows_html = "".join(rows_parts)
         # HTML structure: logo is small and inline, everything fits
         return f"""
 <html>
@@ -191,22 +185,10 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
   <div class="title">GAS BILL</div>
   <div class="customer"><b>CUSTOMER NAME :</b> {self.receipt_data['client_name']}</div>
   <table class="tbl">
-<tr>
-<th>DATE</th>
-<th>GAS TYPE</th>
-<th>CAPACITY</th>
-<th>QTY</th>
-<th>UNIT PRICE</th>
-<th>DISCOUNT</th>
-<th>TAX</th>
-<th>TOTAL</th>
-</tr>
-{rows}
+{('<tr><th>DATE</th><th>PRODUCTS</th><th>QUA</th><th>DISC</th><th>SUB-T</th><th>TAX</th><th>TOTAL</th></tr>' if for_print else '<tr><th>DATE</th><th>PRODUCTS</th><th>QUA</th><th>SUB-T</th><th>TAX</th><th>TOTAL</th></tr>')}
+{rows_html}
 <tr style="font-weight:bold; background:#fff;">
-<td colspan="5" style="text-align:right;">TOTAL QTY</td>
-<td>{total_qty}</td>
-<td style="text-align:right;">GRAND TOTAL</td>
-<td>{float(self.receipt_data['total_amount']):,.0f}</td>
+{('<td colspan="4" style="text-align:right;">TOTAL QTY</td><td>' + str(total_qty) + '</td><td style="text-align:right;">GRAND TOTAL</td><td>' + f"{float(self.receipt_data['total_amount']):,.2f}" + '</td>' if for_print else '<td colspan="3" style="text-align:right;">TOTAL QTY</td><td>' + str(total_qty) + '</td><td style="text-align:right;">GRAND TOTAL</td><td>' + f"{float(self.receipt_data['total_amount']):,.0f}" + '</td>' )}
 </tr>
 </table>
   <div class="bill-box">
@@ -214,11 +196,11 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         {bill_extra_rows}
         <tr>
             <td class="box-label">Pending Bill</td>
-            <td>{self.receipt_data['balance']:,.0f}</td>
+            <td>{self.receipt_data['balance']:,.2f}</td>
         </tr>
         <tr>
             <td class="box-label">Total Bill</td>
-            <td>{float(self.receipt_data['total_amount']):,.0f}</td>
+            <td>{float(self.receipt_data['total_amount']):,.2f}</td>
         </tr>
     </table>
   </div>
@@ -265,34 +247,19 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         story.append(Spacer(1, 3))
         story.append(Paragraph(f'<b>CUSTOMER NAME :</b> {self.receipt_data["client_name"]}', ParagraphStyle('cust', parent=styles['Normal'], alignment=0, fontSize=11)))
         story.append(Spacer(1, 6))
-        # Table header and body
-        items_data = [['DATE', 'GAS TYPE', 'CAPACITY', 'QTY', 'UNIT PRICE', 'DISCOUNT', 'TAX', 'TOTAL']]
-        if items:
-            for item in items:
-                discount_val = max(0.0, float(item['quantity']) * float(item['unit_price']) - float(item['subtotal']))
-                items_data.append([
-                    (item.get('created_at') or self.receipt_data['created_at'])[:10],
-                    item['gas_type'],
-                    f"{item['sub_type'] or ''} {item['capacity']}",
-                    str(item['quantity']),
-                    f"{float(item['unit_price']):,.0f}",
-                    f"{discount_val:,.0f}",
-                    f"{float(item['tax_amount']):,.0f}",
-                    f"{float(item['total_amount']):,.0f}"
-                ])
-        else:
-            discount_val = max(0.0, float(self.receipt_data.get('quantity', 0) or 0) * float(self.receipt_data.get('unit_price', 0) or 0) - float(self.receipt_data.get('subtotal', 0) or 0))
-            items_data.append([
-                self.receipt_data['created_at'][:10],
-                self.receipt_data['gas_type'],
-                self.receipt_data['capacity'],
-                str(self.receipt_data['quantity']),
-                f"{float(self.receipt_data['unit_price']):,.0f}",
-                f"{discount_val:,.0f}",
-                f"{float(self.receipt_data.get('tax_amount', 0) or 0):,.0f}",
-                f"{float(self.receipt_data['total_amount']):,.0f}"
-            ])
-        items_table = Table(items_data, colWidths=[15*mm, 13*mm, 13*mm, 8*mm, 10*mm, 10*mm, 10*mm, 11*mm])
+        summaries = self.db_manager.get_sale_item_summaries(self.receipt_data['sale_id'])
+        products_text = summaries.get('product_summary') or (f"{self.receipt_data.get('gas_type','')} {self.receipt_data.get('capacity','')}".strip())
+        quantities_text = summaries.get('quantities_summary') or str(self.receipt_data.get('quantity') or '')
+        sum_subtotal = sum(float(i['subtotal']) for i in items) if items else float(self.receipt_data.get('subtotal', 0) or 0)
+        items_data = [['DATE', 'PRODUCTS', 'QUANTITIES', 'SUBTOTAL', 'TAX', 'TOTAL'], [
+            self.receipt_data['created_at'][:10],
+            products_text,
+            quantities_text,
+            f"{sum_subtotal:,.0f}",
+            f"{total_tax_val:,.0f}",
+            f"{float(self.receipt_data['total_amount']):,.0f}"
+        ]]
+        items_table = Table(items_data, colWidths=[20*mm, 24*mm, 18*mm, 12*mm, 10*mm, 12*mm])
         items_table.hAlign = 'CENTER'
         items_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
@@ -304,10 +271,8 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         ]))
         story.append(items_table)
         # Footer row for totals
-        totals_data = [
-            ["", "", "", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]
-        ]
-        totals_table = Table(totals_data, colWidths=[15*mm,13*mm,13*mm,8*mm,10*mm,10*mm,10*mm,11*mm])
+        totals_data = [["", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]]
+        totals_table = Table(totals_data, colWidths=[20*mm,24*mm,18*mm,12*mm,10*mm,12*mm])
         totals_table.hAlign = 'CENTER'
         totals_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.5, colors.black),
@@ -390,90 +355,63 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         story.append(Paragraph("GAS BILL", styleBillTitle))
         story.append(Paragraph(f"<b>CUSTOMER NAME :</b> {self.receipt_data['client_name']}", styleLabel))
         story.append(Spacer(1, 8))
-        # -- Receipt Table --
-        items_data = [['DATE', 'GAS TYPE', 'CAPACITY', 'QTY', 'UNIT PRICE', 'DISCOUNT', 'TAX', 'TOTAL']]
-        if items:
-            for item in items:
-                discount_val = max(0.0, float(item['quantity']) * float(item['unit_price']) - float(item['subtotal']))
-                items_data.append([
-                    (item.get('created_at') or self.receipt_data['created_at'])[:10],
-                    item['gas_type'],
-                    f"{item['sub_type'] or ''} {item['capacity']}",
-                    str(item['quantity']),
-                    f"{float(item['unit_price']):,.0f}",
-                    f"{discount_val:,.0f}",
-                    f"{float(item['tax_amount']):,.0f}",
-                    f"{float(item['total_amount']):,.0f}"
-                ])
-        else:
-            discount_val = max(0.0, float(self.receipt_data.get('quantity', 0) or 0) * float(self.receipt_data.get('unit_price', 0) or 0) - float(self.receipt_data.get('subtotal', 0) or 0))
+        items_data = [['DATE', 'PRODUCTS', 'QUANTITIES', 'DISCOUNT', 'SUBTOTAL', 'TAX', 'TOTAL']]
+        for it in items:
+            prod = f"{it['gas_type']}{(' ' + it['sub_type']) if it.get('sub_type') else ''} {it['capacity']}".strip()
+            disc = max(0.0, float(it['quantity']) * float(it['unit_price']) - float(it['subtotal']))
             items_data.append([
-                self.receipt_data['created_at'][:10],
-                self.receipt_data['gas_type'],
-                self.receipt_data['capacity'],
-                str(self.receipt_data['quantity']),
-                f"{float(self.receipt_data['unit_price']):,.0f}",
-                f"{discount_val:,.0f}",
-                f"{float(self.receipt_data.get('tax_amount', 0) or 0):,.0f}",
-                f"{float(self.receipt_data['total_amount']):,.0f}"
+                str(it['created_at'])[:10],
+                prod,
+                str(it['quantity']),
+                f"{disc:,.2f}",
+                f"{float(it['subtotal']):,.2f}",
+                f"{float(it['tax_amount']):,.2f}",
+                f"{float(it['total_amount']):,.2f}"
             ])
-        # For A4: wider columns, bigger fonts
-        items_table = Table(
-            items_data,
-            colWidths=[28*mm, 28*mm, 24*mm, 14*mm, 20*mm, 18*mm, 18*mm, 12*mm],
-            hAlign='CENTER'
-        )
+        items_table = Table(items_data, colWidths=[24*mm, 56*mm, 18*mm, 16*mm, 16*mm, 12*mm, 18*mm], hAlign='CENTER')
         items_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.2, colors.black),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),  # header
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),  # header
-            ('FONTSIZE', (0, 1), (-1, -1), 13),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 1), (-1, -1), 11),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('BACKGROUND', (0, 0), (-1, 0), colors.white),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
             ('TOPPADDING', (0, 1), (-1, -1), 4),
         ]))
         story.append(items_table)
-        # -- Totals --
-        totals_data = [
-            ["", "", "", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.0f}"]
-        ]
-        totals_table = Table(totals_data, colWidths=[28*mm, 28*mm, 24*mm, 14*mm, 20*mm, 18*mm, 18*mm, 12*mm], hAlign='CENTER')
+        totals_data = [["", "", "", "TOTAL QTY", total_qty, "GRAND TOTAL", f"{self.receipt_data['total_amount']:,.2f}"]]
+        totals_table = Table(totals_data, colWidths=[24*mm, 56*mm, 18*mm, 16*mm, 16*mm, 12*mm, 18*mm], hAlign='CENTER')
         totals_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.4, colors.black),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 13),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(totals_table)
         story.append(Spacer(1, 14))
-        # -- Bill/Pending Box --
         labels = []
         if total_tax_val > 0:
-            labels.append(['Tax', f"{total_tax_val:,.0f}"])
+            labels.append(['Tax', f"{total_tax_val:,.2f}"])
         if overall_discount_val > 0:
-            labels.append(['Order Discount', f"{overall_discount_val:,.0f}"])
-        labels.append(['Pending Bill', f"{self.receipt_data['balance']:,.0f}"])
-        labels.append(['Total Bill', f"{self.receipt_data['total_amount']:,.0f}"])
-        bill_table = Table(labels, colWidths=[52*mm, 52*mm], hAlign='CENTER')
+            labels.append(['Order Discount', f"{overall_discount_val:,.2f}"])
+        labels.append(['Pending Bill', f"{self.receipt_data['balance']:,.2f}"])
+        labels.append(['Total Bill', f"{self.receipt_data['total_amount']:,.2f}"])
+        bill_table = Table(labels, colWidths=[32*mm, 40*mm], hAlign='CENTER')
         bill_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1.4, colors.black),
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTSIZE', (0, 0), (-1, -1), 15),
+            ('FONTSIZE', (0, 0), (-1, -1), 12),
             ('BACKGROUND', (0, 0), (-1, -1), colors.white),
-            ('TOPPADDING', (0, 0), (-1, -1), 7),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
         story.append(bill_table)
-        story.append(Spacer(1, 18))
-        # -- Signature --
+        story.append(Spacer(1, 8))
         story.append(Paragraph('Signature________________', styleSignature))
-        story.append(Spacer(1, 18))
-        # -- Footer --
+        story.append(Spacer(1, 7))
         story.append(Paragraph('Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala', styleFooter))
         doc.build(story)
 
@@ -519,7 +457,7 @@ class ReceiptsWidget(QWidget):
         self.receipts_table = QTableWidget()
         self.receipts_table.setColumnCount(9)
         self.receipts_table.setHorizontalHeaderLabels([
-            "Receipt #", "Date", "Client", "Product", "Quantity", "Total", "Paid", "Balance", "Actions"
+            "Receipt #", "Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Actions"
         ])
         self.receipts_table.setAlternatingRowColors(True)
         self.receipts_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -551,18 +489,7 @@ class ReceiptsWidget(QWidget):
     def load_receipts(self):
         """Load all receipts from database"""
         try:
-            query = '''
-                SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
-                       gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.unit_price, 
-                       s.subtotal, s.tax_amount, s.total_amount
-                FROM receipts r
-                JOIN clients c ON r.client_id = c.id
-                JOIN sales s ON r.sale_id = s.id
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                ORDER BY r.created_at DESC
-                LIMIT 100
-            '''
-            receipts = self.db_manager.execute_query(query)
+            receipts = self.db_manager.get_receipts_with_summaries(limit=100)
             
             if not receipts:
                 # Show a message when no receipts exist
@@ -655,18 +582,13 @@ class ReceiptsWidget(QWidget):
                 client_text += f" ({receipt['client_company']})"
             self.receipts_table.setItem(row, 2, QTableWidgetItem(client_text))
             
-            # Product
+            # Products
             product_text = receipt.get('product_summary') or ''
-            if not product_text:
-                product_text = f"{receipt.get('gas_type','')}"
-                if receipt.get('sub_type'):
-                    product_text += f" - {receipt['sub_type']}"
-                if receipt.get('capacity'):
-                    product_text += f" - {receipt['capacity']}"
             self.receipts_table.setItem(row, 3, QTableWidgetItem(product_text))
             
-            # Quantity
-            self.receipts_table.setItem(row, 4, QTableWidgetItem(str(receipt['quantity'])))
+            # Quantities
+            quantities_text = receipt.get('quantities_summary') or str(receipt.get('quantity') or '')
+            self.receipts_table.setItem(row, 4, QTableWidgetItem(quantities_text))
             
             # Total
             total_item = QTableWidgetItem(f"Rs. {receipt['total_amount']:,.2f}")
@@ -735,20 +657,7 @@ class ReceiptsWidget(QWidget):
         search_text = self.search_input.text().strip().lower()
         
         try:
-            query = '''
-                SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
-                       gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.unit_price, 
-                       s.subtotal, s.tax_amount, s.total_amount
-                FROM receipts r
-                JOIN clients c ON r.client_id = c.id
-                JOIN sales s ON r.sale_id = s.id
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                WHERE LOWER(r.receipt_number) LIKE ? OR LOWER(c.name) LIKE ?
-                ORDER BY r.created_at DESC
-                LIMIT 100
-            '''
-            search_pattern = f"%{search_text}%"
-            receipts = self.db_manager.execute_query(query, (search_pattern, search_pattern))
+            receipts = self.db_manager.get_receipts_with_summaries(limit=100, search=search_text if search_text else None)
             self.populate_table(receipts)
             
         except Exception as e:

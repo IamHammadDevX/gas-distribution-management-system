@@ -44,7 +44,7 @@ class DailyTransactionsWidget(QWidget):
         sales_layout = QVBoxLayout(sales_group)
         self.sales_table = QTableWidget()
         self.sales_table.setColumnCount(8)
-        self.sales_table.setHorizontalHeaderLabels(["Date", "Client", "Product", "Quantity", "Total", "Paid", "Balance", "Cashier"])
+        self.sales_table.setHorizontalHeaderLabels(["Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Cashier"])
         self.sales_table.setAlternatingRowColors(True)
         self.sales_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.sales_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -68,23 +68,14 @@ class DailyTransactionsWidget(QWidget):
         self.load_gate_for_date(d_str)
 
     def load_sales_for_date(self, day_str):
-        rows = self.db_manager.execute_query('''
-            SELECT s.*, c.name as client_name, gp.gas_type, gp.sub_type, gp.capacity, u.full_name as cashier_name
-            FROM sales s
-            JOIN clients c ON s.client_id = c.id
-            JOIN gas_products gp ON s.gas_product_id = gp.id
-            JOIN users u ON s.created_by = u.id
-            WHERE DATE(s.created_at, 'localtime') = ?
-            ORDER BY s.created_at DESC
-        ''', (day_str,))
+        rows = self.db_manager.get_sales_for_date_with_summaries(day_str)
         self.sales_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.sales_table.setItem(i, 0, QTableWidgetItem(r['created_at'][:16]))
             client = r['client_name']
             self.sales_table.setItem(i, 1, QTableWidgetItem(client))
-            prod = r['gas_type'] + (f" - {r['sub_type']}" if r['sub_type'] else "") + f" - {r['capacity']}"
-            self.sales_table.setItem(i, 2, QTableWidgetItem(prod))
-            self.sales_table.setItem(i, 3, QTableWidgetItem(str(r['quantity'])))
+            self.sales_table.setItem(i, 2, QTableWidgetItem(r.get('product_summary') or ''))
+            self.sales_table.setItem(i, 3, QTableWidgetItem(r.get('quantities_summary') or str(r.get('quantity') or '')))
             total_item = QTableWidgetItem(f"Rs. {r['total_amount']:,.2f}")
             total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.sales_table.setItem(i, 4, total_item)
@@ -139,7 +130,7 @@ class DailyTransactionsWidget(QWidget):
                 f"<h2 style='text-align:center; font-size:16pt;'>Daily Transactions - {d}</h2>",
                 "<h3 style='font-size:12pt;'>Sales</h3>",
                 "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
-                "<tr><th>Date</th><th>Client</th><th>Product</th><th>Qty</th><th>Total</th><th>Paid</th><th>Balance</th><th>Cashier</th></tr>"
+                "<tr><th>Date</th><th>Client</th><th>Products</th><th>Quantities</th><th>Total</th><th>Paid</th><th>Balance</th><th>Cashier</th></tr>"
             ]
             for i in range(self.sales_table.rowCount()):
                 row = []
@@ -155,6 +146,14 @@ class DailyTransactionsWidget(QWidget):
                     item = self.gate_table.item(i, j)
                     row.append(item.text() if item else "")
                 html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
+            html.append("</table>")
+            cats = self.db_manager.get_empty_stock_by_category(d)
+            html.extend(["<h3 style='font-size:12pt;'>Empty Stock Summary</h3>",
+                         "<table border='1' cellspacing='0' cellpadding='6' style='width:60%; font-size:10pt; border-collapse:collapse;'>",
+                         "<tr><th>Category</th><th>Quantity</th></tr>"])
+            for c in cats:
+                label = f"{c['gas_type']} - {c['capacity']}"
+                html.append(f"<tr><td>{label}</td><td style='text-align:right;'>{c['quantity']}</td></tr>")
             html.append("</table>")
             doc = QTextDocument()
             doc.setDefaultFont(QFont("Arial", 10))

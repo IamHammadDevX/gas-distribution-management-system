@@ -356,6 +356,154 @@ class DatabaseManager:
             JOIN gas_products gp ON s.gas_product_id = gp.id
             WHERE s.id = ?
         ''', (sale_id,))
+
+    def get_sale_item_summaries(self, sale_id: int) -> Dict:
+        row = self.execute_query('''
+            SELECT 
+                (
+                    SELECT GROUP_CONCAT(
+                        COALESCE(gp.gas_type,'') ||
+                        CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                        ' ' || COALESCE(gp.capacity,'')
+                        , ', '
+                    )
+                    FROM sale_items si2
+                    JOIN gas_products gp ON si2.gas_product_id = gp.id
+                    WHERE si2.sale_id = s.id
+                    ORDER BY si2.id
+                ) AS product_summary,
+                (
+                    SELECT GROUP_CONCAT(si2.quantity, ', ')
+                    FROM sale_items si2
+                    WHERE si2.sale_id = s.id
+                    ORDER BY si2.id
+                ) AS quantities_summary
+            FROM sales s
+            WHERE s.id = ?
+        ''', (sale_id,))
+        return row[0] if row else {'product_summary': '', 'quantities_summary': ''}
+
+    def get_receipts_with_summaries(self, limit: int = 100, search: Optional[str] = None) -> List[Dict]:
+        params: tuple = ()
+        where = ''
+        if search:
+            where = 'WHERE LOWER(r.receipt_number) LIKE ? OR LOWER(c.name) LIKE ?'
+            like = f"%{search.lower()}%"
+            params = (like, like)
+        query = f'''
+            SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
+                   s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount,
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = r.sale_id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = r.sale_id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
+            FROM receipts r
+            JOIN clients c ON r.client_id = c.id
+            JOIN sales s ON r.sale_id = s.id
+            {where}
+            ORDER BY r.created_at DESC
+            LIMIT {int(limit)}
+        '''
+        return self.execute_query(query, params)
+
+    def get_recent_sales_with_summaries(self, limit: int = 20) -> List[Dict]:
+        query = f'''
+            SELECT s.*, c.name as client_name, c.phone as client_phone,
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
+            FROM sales s
+            JOIN clients c ON s.client_id = c.id
+            ORDER BY s.created_at DESC
+            LIMIT {int(limit)}
+        '''
+        return self.execute_query(query)
+
+    def get_client_purchases_with_summaries(self, client_id: int, limit: int = 10) -> List[Dict]:
+        query = f'''
+            SELECT s.*, 
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
+            FROM sales s
+            WHERE s.client_id = ?
+            ORDER BY s.created_at DESC
+            LIMIT {int(limit)}
+        '''
+        return self.execute_query(query, (client_id,))
+
+    def get_sales_for_date_with_summaries(self, day: str) -> List[Dict]:
+        query = '''
+            SELECT s.*, c.name as client_name, u.full_name as cashier_name,
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
+            FROM sales s
+            JOIN clients c ON s.client_id = c.id
+            JOIN users u ON s.created_by = u.id
+            WHERE DATE(s.created_at, 'localtime') = ?
+            ORDER BY s.created_at DESC
+        '''
+        return self.execute_query(query, (day,))
     
     def get_next_gate_pass_number(self) -> str:
         query = 'SELECT COUNT(*) + 1 FROM gate_passes'
@@ -413,17 +561,44 @@ class DatabaseManager:
             WHERE client_id = ?
             GROUP BY gas_type, capacity
         ''', (client_id,))
-        rmap = {(r['gas_type'], r['capacity']): r['returned'] for r in returns}
-        summary = []
+        agg_deliveries: Dict[tuple, Dict] = {}
         for d in deliveries:
-            key = (d['gas_type'], d['capacity'])
-            ret = rmap.get(key, 0)
+            gt = (d['gas_type'] or '').strip()
+            cap_raw = (d['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg', d.get('sub_type') or '')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg', d.get('sub_type') or '')
+            else:
+                key = (gt, cap_raw, d.get('sub_type') or '')
+            prev = agg_deliveries.get(key)
+            if prev:
+                prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
+            else:
+                agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(d['delivered'])}
+        agg_returns: Dict[tuple, int] = {}
+        for r in returns:
+            gt = (r['gas_type'] or '').strip()
+            cap_raw = (r['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg')
+            else:
+                key = (gt, cap_raw)
+            agg_returns[key] = agg_returns.get(key, 0) + int(r['returned'])
+        summary: List[Dict] = []
+        for key, d in agg_deliveries.items():
+            rkey = (d['gas_type'], d['capacity'])
+            ret = agg_returns.get(rkey, 0)
             summary.append({
                 'gas_type': d['gas_type'],
                 'sub_type': d.get('sub_type') or '',
                 'capacity': d['capacity'],
-                'delivered': d['delivered'],
-                'returned': ret,
+                'delivered': int(d['delivered']),
+                'returned': int(ret),
                 'remaining': int(d['delivered']) - int(ret)
             })
         return summary
@@ -551,6 +726,39 @@ class DatabaseManager:
                 'remaining': delv - ret
             })
         return out
+
+    def get_empty_stock_by_category(self, day: Optional[str] = None) -> List[Dict]:
+        where = ''
+        params: tuple = ()
+        if day:
+            where = "WHERE DATE(returned_at, 'localtime') = ?"
+            params = (day,)
+        rows = self.execute_query(f'''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as qty
+            FROM cylinder_returns
+            {where}
+            GROUP BY gas_type, capacity
+        ''', params)
+        agg: Dict[tuple, int] = {}
+        for r in rows:
+            gt = (r['gas_type'] or '').strip()
+            cap_raw = (r['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            key: tuple
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg')
+            else:
+                key = (gt, cap_raw)
+            agg[key] = agg.get(key, 0) + int(r['qty'])
+        out = [{
+            'gas_type': k[0],
+            'capacity': k[1],
+            'quantity': v
+        } for k, v in agg.items()]
+        out.sort(key=lambda x: (x['gas_type'], x['capacity']))
+        return out
     
     def get_employees(self) -> List[Dict]:
         query = 'SELECT * FROM employees WHERE is_active = 1 ORDER BY name'
@@ -566,10 +774,26 @@ class DatabaseManager:
     def get_sales_report(self, start_date: date, end_date: date) -> List[Dict]:
         query = '''
             SELECT s.*, c.name as client_name, c.phone as client_phone,
-                   gp.gas_type, gp.sub_type, gp.capacity
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = s.id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
-            JOIN gas_products gp ON s.gas_product_id = gp.id
             WHERE DATE(s.created_at) BETWEEN ? AND ?
             ORDER BY s.created_at DESC
         '''
