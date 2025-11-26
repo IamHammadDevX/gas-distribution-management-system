@@ -79,11 +79,11 @@ class GatePassDialog(QDialog):
         self.client_info_label.setStyleSheet("color: #666; font-style: italic;")
         form_layout.addRow("Client Info:", self.client_info_label)
         
-        # Driver name
-        self.driver_name_input = QLineEdit()
-        self.driver_name_input.setPlaceholderText("Enter driver name")
-        self.driver_name_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form_layout.addRow("Driver Name *:", self.driver_name_input)
+        # Driver (dropdown from Employees)
+        self.driver_combo = QComboBox()
+        self.driver_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.load_drivers()
+        form_layout.addRow("Driver *:", self.driver_combo)
         
         # Vehicle number
         self.vehicle_number_input = QLineEdit()
@@ -146,6 +146,21 @@ class GatePassDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+
+    def load_drivers(self):
+        try:
+            employees = self.db_manager.get_employees()
+            drivers = [e for e in employees if (e.get('role') or '').strip().lower() == 'driver']
+            self.driver_combo.clear()
+            self.driver_combo.setEditable(False)
+            self.driver_combo.addItem("Select driver", None)
+            for d in drivers:
+                self.driver_combo.addItem(d['name'], d)
+            if self.driver_combo.count() > 1:
+                self.driver_combo.setCurrentIndex(1)
+        except Exception:
+            self.driver_combo.clear()
+            self.driver_combo.addItem("Select driver", None)
     
     def on_time_in_toggled(self, checked):
         """Handle time in checkbox toggle"""
@@ -189,7 +204,10 @@ class GatePassDialog(QDialog):
             
             products = self.current_receipt.get('product_summary') or ''
             quantities = self.current_receipt.get('quantities_summary') or str(self.current_receipt.get('quantity') or '')
-            gas_info = f"Products: {products}\nQuantities: {quantities}"
+            # Compute totals and gas info from sale items
+            total_qty, gas_type, capacity = self.compute_receipt_totals()
+            self.quantity_spinbox.setValue(max(1, int(total_qty)))
+            gas_info = f"Products: {products}\nQuantities: {quantities}\nSelected Gas: {gas_type} - {capacity}"
             self.gas_info_label.setText(gas_info)
     
     def load_gate_pass_data(self):
@@ -210,7 +228,14 @@ class GatePassDialog(QDialog):
                 QMessageBox.critical(self, "Database Error", f"Failed to load receipt: {str(e)}")
             
             # Set other fields
-            self.driver_name_input.setText(self.gate_pass_data['driver_name'])
+            # Preselect driver if present; add if not in list
+            existing_name = self.gate_pass_data['driver_name']
+            idx = self.driver_combo.findText(existing_name)
+            if idx >= 0:
+                self.driver_combo.setCurrentIndex(idx)
+            else:
+                self.driver_combo.addItem(existing_name, { 'name': existing_name })
+                self.driver_combo.setCurrentIndex(self.driver_combo.count()-1)
             self.vehicle_number_input.setText(self.gate_pass_data['vehicle_number'])
             self.quantity_spinbox.setValue(self.gate_pass_data['quantity'])
             
@@ -245,7 +270,7 @@ class GatePassDialog(QDialog):
     def set_read_only(self):
         """Set form to read-only mode for viewing"""
         self.receipt_search_input.setEnabled(False)
-        self.driver_name_input.setEnabled(False)
+        self.driver_combo.setEnabled(False)
         self.vehicle_number_input.setEnabled(False)
         self.quantity_spinbox.setEnabled(False)
         self.time_out_datetime.setEnabled(False)
@@ -256,6 +281,28 @@ class GatePassDialog(QDialog):
             button_box.button(QDialogButtonBox.Ok).setText("Close")
             button_box.button(QDialogButtonBox.Cancel).hide()
     
+    def compute_receipt_totals(self):
+        """Compute total quantity and canonical gas type/capacity for this receipt.
+        If multiple products exist, use 'Mixed'/'Mixed'."""
+        try:
+            if not self.current_receipt:
+                return (1, 'Unknown', 'Unknown')
+            sale_id = self.current_receipt['sale_id']
+            items = self.db_manager.get_sale_items(sale_id)
+            total_qty = sum(int(i['quantity']) for i in items) if items else int(self.current_receipt.get('quantity') or 1)
+            keys = {( (i.get('gas_type') or '').strip(), (i.get('capacity') or '').strip() ) for i in items} if items else set()
+            if len(keys) == 1 and keys:
+                gt, cap = next(iter(keys))
+            else:
+                gt, cap = 'Mixed', 'Mixed'
+            # Cache for reuse in validate/get_gate_pass_data
+            self._cached_gas_type = gt
+            self._cached_capacity = cap
+            self._cached_total_qty = total_qty
+            return (total_qty, gt, cap)
+        except Exception:
+            return (int(self.current_receipt.get('quantity') or 1), (self.current_receipt.get('gas_type') or 'Unknown'), (self.current_receipt.get('capacity') or 'Unknown'))
+    
     def validate(self):
         """Validate form data"""
         # Only validate receipt for new gate passes, not when editing
@@ -263,9 +310,9 @@ class GatePassDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", "Please select a valid receipt.")
             return False
         
-        driver_name = self.driver_name_input.text().strip()
-        if not driver_name:
-            QMessageBox.warning(self, "Validation Error", "Driver name is required.")
+        driver_name = self.driver_combo.currentText().strip()
+        if not driver_name or self.driver_combo.currentData() is None:
+            QMessageBox.warning(self, "Validation Error", "Please select a driver.")
             return False
         
         vehicle_number = self.vehicle_number_input.text().strip()
@@ -279,13 +326,15 @@ class GatePassDialog(QDialog):
             return False
         
         # Only check receipt quantity for new gate passes
-        if not self.gate_pass_data and self.current_receipt and quantity > self.current_receipt['quantity']:
-            QMessageBox.warning(
-                self,
-                "Validation Error",
-                f"Quantity cannot exceed receipt quantity ({self.current_receipt['quantity']})."
-            )
-            return False
+        if not self.gate_pass_data and self.current_receipt:
+            total_qty, _, _ = self.compute_receipt_totals()
+            if quantity > int(total_qty):
+                QMessageBox.warning(
+                    self,
+                    "Validation Error",
+                    f"Quantity cannot exceed receipt total quantity ({int(total_qty)})."
+                )
+                return False
         
         return True
     
@@ -297,7 +346,7 @@ class GatePassDialog(QDialog):
         
         # For editing, we don't need receipt data since it's already set
         data = {
-            'driver_name': self.driver_name_input.text().strip(),
+            'driver_name': self.driver_combo.currentText().strip(),
             'vehicle_number': self.vehicle_number_input.text().strip(),
             'quantity': self.quantity_spinbox.value(),
             'time_out': self.time_out_datetime.dateTime().toString("yyyy-MM-dd hh:mm:ss"),
@@ -310,8 +359,9 @@ class GatePassDialog(QDialog):
         if self.current_receipt:
             data['receipt_id'] = self.current_receipt['id']
             data['client_id'] = self.current_receipt['client_id']
-            data['gas_type'] = self.current_receipt['gas_type']
-            data['capacity'] = self.current_receipt['capacity']
+            total_qty, gt, cap = self.compute_receipt_totals()
+            data['gas_type'] = gt
+            data['capacity'] = cap
         
         return data
     
@@ -610,6 +660,7 @@ class GatePassesWidget(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to create gate pass: {str(e)}")
+
     
     def edit_gate_pass(self, gate_pass_data: dict):
         """Edit gate pass details"""

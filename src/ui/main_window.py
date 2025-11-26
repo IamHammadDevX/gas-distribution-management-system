@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
             ("Cylinder Track", "cylinder_track"),
             ("Vehicle Expenses", "vehicle_expenses"),
             ("Gate Passes", "gate_passes"),
+            ("Weekly Billing", "weekly_billing"),
             ("Employees", "employees"),
             ("Reports", "reports"),
             ("Settings", "settings")
@@ -331,6 +332,15 @@ class MainWindow(QMainWindow):
         gate_passes_widget = GatePassesWidget(self.db_manager, self.current_user)
         self.widgets["gate_passes"] = gate_passes_widget
         self.content_area.addWidget(gate_passes_widget)
+
+        # Weekly Billing widget
+        try:
+            from components.weekly_billing import WeeklyBillingWidget
+            weekly_widget = WeeklyBillingWidget(self.db_manager, self.current_user)
+            self.widgets["weekly_billing"] = weekly_widget
+            self.content_area.addWidget(weekly_widget)
+        except Exception as e:
+            print(f"Failed to load Weekly Billing: {str(e)}")
         
         # Employees widget
         employees_widget = EmployeesWidget(self.db_manager, self.current_user)
@@ -613,9 +623,9 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'vehicle_expenses', 'gate_passes', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'vehicle_expenses', 'gate_passes', 'weekly_billing', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'vehicle_expenses', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'vehicle_expenses', 'weekly_billing', 'reports']
         elif role == 'Gate Operator':
             enabled_modules = ['dashboard', 'daily_transactions', 'cylinder_track', 'gate_passes']
         elif role == 'Driver':
@@ -649,6 +659,7 @@ class MainWindow(QMainWindow):
                 "cylinder_track": "Cylinder Track",
                 "vehicle_expenses": "Vehicle Expenses",
                 "gate_passes": "Gate Passes",
+                "weekly_billing": "Weekly Billing",
                 "employees": "Employee Management",
                 "reports": "Reports",
                 "settings": "Settings"
@@ -680,6 +691,9 @@ class MainWindow(QMainWindow):
             elif page_name == "daily_transactions":
                 if hasattr(self.widgets['daily_transactions'], 'load_transactions'):
                     self.widgets['daily_transactions'].load_transactions()
+            elif page_name == "weekly_billing":
+                if hasattr(self.widgets['weekly_billing'], 'refresh_data'):
+                    self.widgets['weekly_billing'].refresh_data()
             elif page_name == "employees":
                 if hasattr(self.widgets['employees'], 'load_employees'):
                     self.widgets['employees'].load_employees()
