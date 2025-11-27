@@ -6,9 +6,20 @@ import shutil
 import json
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "rajput_gas.db"):
+    def __init__(self, db_path: str = None):
+        if not db_path:
+            db_path = self._default_db_path()
         self.db_path = db_path
         self.init_database()
+
+    @staticmethod
+    def _default_db_path() -> str:
+        base = os.environ.get("LOCALAPPDATA")
+        if not base:
+            base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        dir_path = os.path.join(base, "Rajput Gas Ltd")
+        os.makedirs(dir_path, exist_ok=True)
+        return os.path.join(dir_path, "rajput_gas.db")
     
     def init_database(self):
         with sqlite3.connect(self.db_path) as conn:
