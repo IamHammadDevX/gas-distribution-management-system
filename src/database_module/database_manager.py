@@ -14,12 +14,21 @@ class DatabaseManager:
 
     @staticmethod
     def _default_db_path() -> str:
-        base = os.environ.get("LOCALAPPDATA")
-        if not base:
-            base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
-        dir_path = os.path.join(base, "Rajput Gas Ltd")
-        os.makedirs(dir_path, exist_ok=True)
-        return os.path.join(dir_path, "rajput_gas.db")
+        import sys
+        project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
+        try:
+            test_path = os.path.join(project_root, ".writetest.tmp")
+            with open(test_path, "w") as f:
+                f.write("1")
+            os.remove(test_path)
+            return os.path.join(project_root, "rajput_gas.db")
+        except Exception:
+            base = os.environ.get("LOCALAPPDATA")
+            if not base:
+                base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+            dir_path = os.path.join(base, "Rajput Gas Ltd")
+            os.makedirs(dir_path, exist_ok=True)
+            return os.path.join(dir_path, "rajput_gas.db")
     
     def init_database(self):
         with sqlite3.connect(self.db_path) as conn:
