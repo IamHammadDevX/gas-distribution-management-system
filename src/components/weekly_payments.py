@@ -28,6 +28,17 @@ class WeeklyClientReceiptDialog(QDialog):
         bar.addWidget(close_btn)
         layout.addLayout(bar)
 
+    def resolve_logo_path(self) -> str:
+        import os, sys
+        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.argv[0]))
+        candidate = os.path.join(base, 'logo.png')
+        if os.path.exists(candidate):
+            return candidate.replace('\\', '/')
+        fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logo.png'))
+        if os.path.exists(fallback):
+            return fallback.replace('\\', '/')
+        return 'logo.png'
+
     def generate_html(self) -> str:
         style = """
 body { font-family: Arial, sans-serif; color:#000; margin:0; }
@@ -54,7 +65,7 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
 <div class='page'>
   <div class='header'>
     <div style='display:flex; align-items:center; justify-content:center; gap:12px;'>
-      <img src='logo.png' alt='Logo' width='32' height='32' style='border:1.5px solid #444; border-radius:50%;' />
+      <img src='" + self.resolve_logo_path() + "' alt='Logo' width='32' height='32' style='border:1.5px solid #444; border-radius:50%;' />
       <div>
         <div style='font-size:22px; font-weight:900;'>RAJPUT GAS TRADERS</div>
         <div class='meta' style='font-size:12px;'>Prop: Saleem Ahmad | 0301-6465144</div>

@@ -1037,10 +1037,11 @@ class DatabaseManager:
     
     def get_gate_activity_report(self, start_date: date, end_date: date) -> List[Dict]:
         query = '''
-            SELECT gp.*, c.name as client_name, u.full_name as operator_name
+            SELECT gp.*, c.name AS client_name, u.full_name AS operator_name, r.receipt_number AS receipt_number
             FROM gate_passes gp
             JOIN clients c ON gp.client_id = c.id
             JOIN users u ON gp.gate_operator_id = u.id
+            LEFT JOIN receipts r ON gp.receipt_id = r.id
             WHERE DATE(gp.created_at) BETWEEN ? AND ?
             ORDER BY gp.created_at DESC
         '''

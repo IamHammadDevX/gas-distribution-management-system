@@ -53,6 +53,16 @@ class ReceiptDialog(QDialog):
         button_layout.addWidget(close_btn)
         
         layout.addLayout(button_layout)
+    def _logo_path(self) -> str:
+        import os, sys
+        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.argv[0]))
+        candidate = os.path.join(base, 'logo.png')
+        if os.path.exists(candidate):
+            return candidate.replace('\\', '/')
+        fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logo.png'))
+        if os.path.exists(fallback):
+            return fallback.replace('\\', '/')
+        return 'logo.png'
     
     def print_receipt(self):
         """Print the receipt (A4, small logo, fit content)"""
@@ -93,7 +103,7 @@ class ReceiptDialog(QDialog):
                 QMessageBox.critical(self, "Export Error", f"Failed to export PDF: {str(e)}")
     
     def generate_receipt_html(self, for_print: bool = False) -> str:
-        logo_path = "logo.png"
+        logo_path = self._logo_path()
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
         total_tax_val = sum(float(i['tax_amount']) for i in items) if items else float(self.receipt_data.get('tax_amount', 0) or 0)
@@ -212,7 +222,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         """
 
     def generate_pdf_receipt(self, filename: str):
-        logo_path = "logo.png" # update as needed
+        logo_path = self._logo_path()
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
         total_tax_val = sum(float(i['tax_amount']) for i in items) if items else float(self.receipt_data.get('tax_amount', 0) or 0)
@@ -310,7 +320,7 @@ body { font-family: Arial, sans-serif; color: #000; background: #fff; margin: 0;
         doc.build(story)
     
     def generate_pdf_receipt(self, filename: str):
-        logo_path = "logo.png"  # Update as needed; must be in your project root or use correct path
+        logo_path = self._logo_path()
         items = self.db_manager.get_sale_items(self.receipt_data['sale_id'])
         total_qty = sum(item['quantity'] for item in items) if items else int(self.receipt_data.get('quantity', 0))
         total_tax_val = sum(float(i['tax_amount']) for i in items) if items else float(self.receipt_data.get('tax_amount', 0) or 0)

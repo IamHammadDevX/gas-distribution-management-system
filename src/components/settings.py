@@ -111,11 +111,11 @@ class SettingsWidget(QWidget):
         tax_layout = QFormLayout()
         tax_layout.setSpacing(10)
         
-        self.tax_rate_input = QLineEdit("16")
+        self.tax_rate_input = QLineEdit("Customizeable")
         self.tax_rate_input.setReadOnly(True)  # Fixed at 16% as per requirements
         tax_layout.addRow("Tax Rate (%):", self.tax_rate_input)
         
-        tax_layout.addRow(QLabel("Note: Tax rate is fixed at 16% as per business requirements"))
+        tax_layout.addRow(QLabel("Note: Tax rate is not fixed."))
         
         tax_group.setLayout(tax_layout)
         general_layout.addWidget(tax_group)
