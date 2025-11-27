@@ -30,10 +30,15 @@ class WeeklyClientReceiptDialog(QDialog):
 
     def resolve_logo_path(self) -> str:
         import os, sys
-        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.argv[0]))
-        candidate = os.path.join(base, 'logo.png')
-        if os.path.exists(candidate):
-            return candidate.replace('\\', '/')
+        base_mei = getattr(sys, '_MEIPASS', None)
+        exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(sys.argv[0])
+        if base_mei:
+            p = os.path.join(base_mei, 'logo.png')
+            if os.path.exists(p):
+                return p.replace('\\', '/')
+        p = os.path.join(exe_dir, 'logo.png')
+        if os.path.exists(p):
+            return p.replace('\\', '/')
         fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logo.png'))
         if os.path.exists(fallback):
             return fallback.replace('\\', '/')
