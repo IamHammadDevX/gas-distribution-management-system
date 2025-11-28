@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEd
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 
 class WeeklyClientReceiptDialog(QDialog):
     def __init__(self, invoice_row: dict, parent=None):

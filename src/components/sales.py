@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QInputDialog, QCheckBox
 )
 from PySide6.QtCore import Qt
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 
 class SalesWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -675,7 +675,7 @@ class SalesWidget(QWidget):
 
     def open_receipt(self, receipt):
         try:
-            from components.receipts import ReceiptDialog
+            from src.components.receipts import ReceiptDialog
             receipt_data = self.db_manager.execute_query('''
                 SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
                        gp.gas_type, gp.sub_type, gp.capacity, s.quantity, s.unit_price,

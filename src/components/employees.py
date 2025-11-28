@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QDoubleSpinBox, QDateEdit, QComboBox, QHeaderView, QGroupBox)
 from PySide6.QtCore import Qt, QDate
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 from datetime import datetime
 
 class AddEmployeeDialog(QDialog):

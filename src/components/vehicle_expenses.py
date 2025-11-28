@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QComboBox, QLineEdit, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox
 from PySide6.QtCore import Qt, QDate
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 
 class VehicleExpensesWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):

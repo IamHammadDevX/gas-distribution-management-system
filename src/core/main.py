@@ -2,10 +2,10 @@ import sys
 import os
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PySide6.QtCore import Qt, QTimer
-from database_module import DatabaseManager
-from components.auth import LoginDialog
-from ui.main_window import MainWindow
-from components.backup import BackupManager
+from src.database_module import DatabaseManager
+from src.components.auth import LoginDialog
+from src.ui.main_window import MainWindow
+from src.components.backup import BackupManager
 
 class RajputGasManagement(QApplication):
     def __init__(self, argv):

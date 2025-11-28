@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QTextEdit, QComboBox, QHeaderView)
 from PySide6.QtCore import Qt, Signal
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 
 class AddClientDialog(QDialog):
     def __init__(self, db_manager: DatabaseManager, parent=None, client_data=None):

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QSpinBox, QMessageBox
 from PySide6.QtCore import Qt
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 
 class CylinderTrackWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):

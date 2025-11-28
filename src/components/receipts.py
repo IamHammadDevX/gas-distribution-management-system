@@ -8,7 +8,7 @@ from PySide6.QtGui import QTextDocument
 from PySide6.QtCore import QSizeF
 from PySide6.QtGui import QPageSize, QPageLayout
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

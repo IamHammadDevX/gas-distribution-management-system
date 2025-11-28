@@ -2,16 +2,16 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                                QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy, QScrollArea)
 from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
 from PySide6.QtGui import QFont, QGuiApplication
-from database_module import DatabaseManager
+from src.database_module import DatabaseManager
 from datetime import datetime
-from components.clients import ClientsWidget
-from components.gas_products import GasProductsWidget
-from components.sales import SalesWidget
-from components.receipts import ReceiptsWidget
-from components.gate_passes import GatePassesWidget
-from components.employees import EmployeesWidget
-from components.reports import ReportsWidget
-from components.settings import SettingsWidget
+from src.components.clients import ClientsWidget
+from src.components.gas_products import GasProductsWidget
+from src.components.sales import SalesWidget
+from src.components.receipts import ReceiptsWidget
+from src.components.gate_passes import GatePassesWidget
+from src.components.employees import EmployeesWidget
+from src.components.reports import ReportsWidget
+from src.components.settings import SettingsWidget
 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -311,19 +311,19 @@ class MainWindow(QMainWindow):
         self.content_area.addWidget(receipts_widget)
 
         # Daily Transactions widget
-        from components.daily_transactions import DailyTransactionsWidget
+        from src.components.daily_transactions import DailyTransactionsWidget
         daily_widget = DailyTransactionsWidget(self.db_manager, self.current_user)
         self.widgets["daily_transactions"] = daily_widget
         self.content_area.addWidget(daily_widget)
 
         # Cylinder Track widget
-        from components.cylinder_track import CylinderTrackWidget
+        from src.components.cylinder_track import CylinderTrackWidget
         cyl_widget = CylinderTrackWidget(self.db_manager, self.current_user)
         self.widgets["cylinder_track"] = cyl_widget
         self.content_area.addWidget(cyl_widget)
 
         # Vehicle Expenses widget
-        from components.vehicle_expenses import VehicleExpensesWidget
+        from src.components.vehicle_expenses import VehicleExpensesWidget
         vexp_widget = VehicleExpensesWidget(self.db_manager, self.current_user)
         self.widgets["vehicle_expenses"] = vexp_widget
         self.content_area.addWidget(vexp_widget)
@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
         self.widgets["gate_passes"] = gate_passes_widget
         self.content_area.addWidget(gate_passes_widget)
 
-        from components.weekly_payments import WeeklyPaymentsWidget
+        from src.components.weekly_payments import WeeklyPaymentsWidget
         weekly_widget = WeeklyPaymentsWidget(self.db_manager, self.current_user)
         self.widgets["weekly_payments"] = weekly_widget
         self.content_area.addWidget(weekly_widget)
@@ -717,7 +717,7 @@ class MainWindow(QMainWindow):
             self.db_manager.log_activity("LOGOUT", f"User {self.current_user['username']} logged out")
             self.close()
             # Show login dialog again instead of restarting
-            from components.auth import LoginDialog
+            from src.components.auth import LoginDialog
             login_dialog = LoginDialog(self.db_manager)
             if login_dialog.exec() == LoginDialog.Accepted:
                 self.current_user = login_dialog.get_user()

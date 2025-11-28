@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+*.iss
 build/
 develop-eggs/
 dist/
