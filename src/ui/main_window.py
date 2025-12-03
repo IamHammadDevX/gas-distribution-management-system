@@ -528,14 +528,16 @@ class MainWindow(QMainWindow):
         result = self.db_manager.execute_query(query, (today_str,))
         cylinders_in_today = result[0]['total'] if result else 0
 
-        # Pending = total delivered - total returned
         query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes'
         result = self.db_manager.execute_query(query)
         total_delivered = int(result[0]['total']) if result else 0
+        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM client_initial_outstanding'
+        result = self.db_manager.execute_query(query)
+        total_initial_outstanding = int(result[0]['total']) if result else 0
         query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM cylinder_returns'
         result = self.db_manager.execute_query(query)
-        total_returned = result[0]['total'] if result else 0
-        pending_cylinders = int(total_delivered) - int(total_returned)
+        total_returned = int(result[0]['total']) if result else 0
+        pending_cylinders = int(total_delivered) + int(total_initial_outstanding) - int(total_returned)
 
         # Total cylinders in (returned)
         total_cylinders_in = int(total_returned)

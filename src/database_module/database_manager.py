@@ -61,6 +61,10 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            try:
+                cursor.execute('ALTER TABLE clients ADD COLUMN initial_previous_balance DECIMAL(10,2) DEFAULT 0')
+            except Exception:
+                pass
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS gas_products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,6 +162,17 @@ class DatabaseManager:
                     quantity INTEGER NOT NULL,
                     returned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (gate_pass_id) REFERENCES gate_passes (id),
+                    FOREIGN KEY (client_id) REFERENCES clients (id)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS client_initial_outstanding (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    client_id INTEGER NOT NULL,
+                    gas_type TEXT NOT NULL,
+                    capacity TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (client_id) REFERENCES clients (id)
                 )
             ''')
@@ -313,27 +328,30 @@ class DatabaseManager:
         clients = self.execute_query(query, (client_id,))
         return clients[0] if clients else None
     
-    def add_client(self, name: str, phone: str, address: str = "", company: str = "") -> int:
+    def add_client(self, name: str, phone: str, address: str = "", company: str = "", initial_previous_balance: float = 0.0) -> int:
         query = '''
-            INSERT INTO clients (name, phone, address, company)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO clients (name, phone, address, company, initial_previous_balance, total_purchases, total_paid, balance)
+            VALUES (?, ?, ?, ?, COALESCE(?,0), 0, 0, COALESCE(?,0))
         '''
-        return self.execute_update(query, (name, phone, address, company))
+        val = float(initial_previous_balance or 0.0)
+        return self.execute_update(query, (name, phone, address, company, val, val))
     
-    def update_client(self, client_id: int, name: str, phone: str, address: str = "", company: str = "") -> bool:
+    def update_client(self, client_id: int, name: str, phone: str, address: str = "", company: str = "", initial_previous_balance: Optional[float] = None) -> bool:
         query = '''
             UPDATE clients 
-            SET name = ?, phone = ?, address = ?, company = ?, updated_at = CURRENT_TIMESTAMP
+            SET name = ?, phone = ?, address = ?, company = ?, 
+                initial_previous_balance = COALESCE(?, initial_previous_balance),
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         '''
-        return self.execute_update(query, (name, phone, address, company, client_id)) > 0
+        return self.execute_update(query, (name, phone, address, company, initial_previous_balance, client_id)) > 0
     
     def update_client_balance(self, client_id: int):
         query = '''
             UPDATE clients 
             SET total_purchases = COALESCE((SELECT SUM(total_amount) FROM sales WHERE client_id = ?), 0),
                 total_paid = COALESCE((SELECT SUM(amount_paid) FROM sales WHERE client_id = ?), 0),
-                balance = COALESCE((SELECT SUM(balance) FROM sales WHERE client_id = ?), 0),
+                balance = COALESCE((SELECT SUM(balance) FROM sales WHERE client_id = ?), 0) + COALESCE(initial_previous_balance, 0),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         '''
@@ -532,7 +550,9 @@ class DatabaseManager:
             FROM sales
             WHERE client_id = ? AND DATE(created_at) < ?
         ''', (client_id, week_start))
-        previous_balance = float(prev_rows[0]['prev_balance']) if prev_rows else 0.0
+        init_rows = self.execute_query('SELECT COALESCE(initial_previous_balance,0) AS init_prev FROM clients WHERE id = ?', (client_id,))
+        init_prev = float(init_rows[0]['init_prev']) if init_rows else 0.0
+        previous_balance = init_prev + (float(prev_rows[0]['prev_balance']) if prev_rows else 0.0)
         final_payable = previous_balance + total_payable
         pay_rows = self.execute_query('''
             SELECT COALESCE(SUM(amount),0) AS paid
@@ -780,9 +800,14 @@ class DatabaseManager:
             'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
             (client_id, gas_type, capacity)
         )
+        initial_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
         delivered = int(delivered_rows[0]['total']) if delivered_rows else 0
         returned = int(returned_rows[0]['total']) if returned_rows else 0
-        remaining = delivered - returned
+        initial_delivered = int(initial_rows[0]['total']) if initial_rows else 0
+        remaining = (delivered + initial_delivered) - returned
         if qty > remaining:
             raise ValueError(f"Return quantity {qty} exceeds pending {remaining}")
         query = '''
@@ -790,6 +815,60 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, ?)
         '''
         return self.execute_update(query, (gate_pass_id, client_id, gas_type, capacity, qty))
+
+    def get_return_rows_for_client_product(self, client_id: int, gas_type: str, capacity: str) -> List[Dict]:
+        return self.execute_query('''
+            SELECT id, quantity, returned_at
+            FROM cylinder_returns
+            WHERE client_id = ? AND gas_type = ? AND capacity = ?
+            ORDER BY returned_at DESC, id DESC
+        ''', (client_id, gas_type, capacity))
+
+    def update_total_return_for_client_product(self, client_id: int, gas_type: str, capacity: str, new_total: int) -> bool:
+        if new_total is None or int(new_total) < 0:
+            raise ValueError('Total returned cannot be negative')
+        target = int(new_total)
+        d_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
+        i_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
+        r_rows = self.execute_query(
+            'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+            (client_id, gas_type, capacity)
+        )
+        delivered = int(d_rows[0]['total']) if d_rows else 0
+        initial_delivered = int(i_rows[0]['total']) if i_rows else 0
+        current = int(r_rows[0]['total']) if r_rows else 0
+        max_allowed = delivered + initial_delivered
+        if target > max_allowed:
+            raise ValueError('Total returned cannot exceed total delivered')
+        if target == current:
+            return True
+        if target > current:
+            add_qty = target - current
+            self.execute_update('''
+                INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (None, client_id, gas_type, capacity, int(add_qty)))
+            return True
+        diff = current - target
+        rows = self.get_return_rows_for_client_product(client_id, gas_type, capacity)
+        for r in rows:
+            if diff <= 0:
+                break
+            q = int(r['quantity'])
+            if q <= diff:
+                self.execute_update('DELETE FROM cylinder_returns WHERE id = ?', (r['id'],))
+                diff -= q
+            else:
+                new_q = q - diff
+                self.execute_update('UPDATE cylinder_returns SET quantity = ? WHERE id = ?', (new_q, r['id']))
+                diff = 0
+        return True
 
     def get_cylinder_summary_for_client(self, client_id: int):
         deliveries = self.execute_query('''
@@ -801,6 +880,12 @@ class DatabaseManager:
             LEFT JOIN gas_products prod ON s.gas_product_id = prod.id
             WHERE gp.client_id = ?
             GROUP BY gp.gas_type, prod.sub_type, gp.capacity
+        ''', (client_id,))
+        initials = self.execute_query('''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as delivered
+            FROM client_initial_outstanding
+            WHERE client_id = ?
+            GROUP BY gas_type, capacity
         ''', (client_id,))
         returns = self.execute_query('''
             SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
@@ -819,6 +904,21 @@ class DatabaseManager:
                 key = ('LPG', '45kg', d.get('sub_type') or '')
             else:
                 key = (gt, cap_raw, d.get('sub_type') or '')
+            prev = agg_deliveries.get(key)
+            if prev:
+                prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
+            else:
+                agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(d['delivered'])}
+        for d in initials:
+            gt = (d['gas_type'] or '').strip()
+            cap_raw = (d['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg', '')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg', '')
+            else:
+                key = (gt, cap_raw, '')
             prev = agg_deliveries.get(key)
             if prev:
                 prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
@@ -937,7 +1037,7 @@ class DatabaseManager:
         return rows[0]['id'] if rows else None
     
     def get_type_summary_for_client(self, client_id: int) -> List[Dict]:
-        delivered = self.execute_query('''
+        delivered_rows = self.execute_query('''
             SELECT gp.gas_type as gas_type, COALESCE(SUM(si.quantity),0) as delivered
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.id
@@ -946,32 +1046,78 @@ class DatabaseManager:
             WHERE r.client_id = ?
             GROUP BY gp.gas_type
         ''', (client_id,))
-        if not delivered:
-            delivered = self.execute_query('''
+        if not delivered_rows:
+            delivered_rows = self.execute_query('''
                 SELECT gp.gas_type as gas_type, COALESCE(SUM(s.quantity),0) as delivered
                 FROM sales s
                 JOIN gas_products gp ON s.gas_product_id = gp.id
                 WHERE s.client_id = ?
                 GROUP BY gp.gas_type
             ''', (client_id,))
+        initial_rows = self.execute_query('''
+            SELECT gas_type, COALESCE(SUM(quantity),0) as delivered
+            FROM client_initial_outstanding
+            WHERE client_id = ?
+            GROUP BY gas_type
+        ''', (client_id,))
         returns = self.execute_query('''
             SELECT gas_type, COALESCE(SUM(quantity),0) as returned
             FROM cylinder_returns
             WHERE client_id = ?
             GROUP BY gas_type
         ''', (client_id,))
+        dmap: Dict[str, int] = {}
+        for d in delivered_rows:
+            dmap[d['gas_type']] = dmap.get(d['gas_type'], 0) + int(d['delivered'])
+        for i in initial_rows:
+            dmap[i['gas_type']] = dmap.get(i['gas_type'], 0) + int(i['delivered'])
         rmap = {r['gas_type']: int(r['returned']) for r in returns}
-        out = []
-        for d in delivered:
-            gt = d['gas_type']
-            delv = int(d['delivered'])
-            ret = rmap.get(gt, 0)
+        keys = set(list(dmap.keys()) + list(rmap.keys()))
+        out: List[Dict] = []
+        for gt in sorted(keys):
+            delv = int(dmap.get(gt, 0))
+            ret = int(rmap.get(gt, 0))
             out.append({
                 'gas_type': gt,
                 'delivered': delv,
                 'returned': ret,
                 'remaining': delv - ret
             })
+        return out
+
+    def get_pending_capacity_map_for_client(self, client_id: int) -> Dict[str, List[str]]:
+        rows = self.execute_query('''
+            SELECT gas_type, capacity, COALESCE(SUM(qty),0) as delivered
+            FROM (
+                SELECT gp.gas_type as gas_type, gp.capacity as capacity, gp.quantity as qty
+                FROM gate_passes gp
+                WHERE gp.client_id = ?
+                UNION ALL
+                SELECT cio.gas_type as gas_type, cio.capacity as capacity, cio.quantity as qty
+                FROM client_initial_outstanding cio
+                WHERE cio.client_id = ?
+            ) X
+            GROUP BY gas_type, capacity
+        ''', (client_id, client_id))
+        rrows = self.execute_query('''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gas_type, capacity
+        ''', (client_id,))
+        rmap: Dict[tuple, int] = {}
+        for r in rrows:
+            rmap[(r['gas_type'], r['capacity'])] = int(r['returned'])
+        out: Dict[str, List[str]] = {}
+        for row in rows:
+            gt = row['gas_type']
+            cap = row['capacity']
+            delivered = int(row['delivered'])
+            returned = rmap.get((gt, cap), 0)
+            if delivered > returned:
+                out.setdefault(gt, []).append(cap)
+        for gt in list(out.keys()):
+            out[gt] = sorted(out[gt])
         return out
 
     def get_empty_stock_by_category(self, day: Optional[str] = None) -> List[Dict]:
@@ -1007,6 +1153,13 @@ class DatabaseManager:
         out.sort(key=lambda x: (x['gas_type'], x['capacity']))
         return out
     
+    def add_client_initial_outstanding(self, client_id: int, gas_type: str, capacity: str, quantity: int) -> int:
+        query = '''
+            INSERT INTO client_initial_outstanding (client_id, gas_type, capacity, quantity)
+            VALUES (?, ?, ?, ?)
+        '''
+        return self.execute_update(query, (client_id, gas_type, capacity, int(quantity)))
+
     def get_employees(self) -> List[Dict]:
         query = 'SELECT * FROM employees WHERE is_active = 1 ORDER BY name'
         return self.execute_query(query)

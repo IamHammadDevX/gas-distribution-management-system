@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                                QTableWidgetItem, QPushButton, QLineEdit, QLabel, 
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
-                               QTextEdit, QComboBox, QHeaderView)
+                               QTextEdit, QComboBox, QHeaderView, QDoubleSpinBox, QSpinBox, QGroupBox)
 from PySide6.QtCore import Qt, Signal
 from src.database_module import DatabaseManager
 
@@ -11,7 +11,7 @@ class AddClientDialog(QDialog):
         self.db_manager = db_manager
         self.client_data = client_data
         self.setWindowTitle("Add Client" if not client_data else "Edit Client")
-        self.setFixedSize(500, 400)
+        self.setFixedSize(700, 520)
         self.init_ui()
         
         if client_data:
@@ -42,8 +42,67 @@ class AddClientDialog(QDialog):
         self.company_input = QLineEdit()
         self.company_input.setPlaceholderText("Enter company name (optional)")
         form_layout.addRow("Company:", self.company_input)
+
+        self.previous_balance_input = QDoubleSpinBox()
+        self.previous_balance_input.setRange(0.0, 100000000.0)
+        self.previous_balance_input.setDecimals(2)
+        self.previous_balance_input.setPrefix("Rs. ")
+        form_layout.addRow("Previous Balance:", self.previous_balance_input)
         
         layout.addLayout(form_layout)
+
+        self.initial_entries = []
+        products = self.db_manager.get_gas_products()
+        gas_types = sorted(list({p['gas_type'] for p in products}))
+        by_gas = {}
+        for p in products:
+            by_gas.setdefault(p['gas_type'], set()).add(p['capacity'])
+
+        group = QGroupBox("Initial Outstanding Empty Cylinders")
+        g_layout = QVBoxLayout(group)
+        row = QHBoxLayout()
+        self.gas_combo = QComboBox()
+        self.gas_combo.addItems(gas_types)
+        self.capacity_combo = QComboBox()
+        def refresh_caps():
+            gt = self.gas_combo.currentText()
+            caps = sorted(list(by_gas.get(gt, set())))
+            self.capacity_combo.clear()
+            self.capacity_combo.addItems(caps)
+        self.gas_combo.currentTextChanged.connect(refresh_caps)
+        refresh_caps()
+        self.qty_spin = QSpinBox()
+        self.qty_spin.setRange(0, 1000)
+        add_btn = QPushButton("Add")
+        def add_entry():
+            gt = self.gas_combo.currentText()
+            cap = self.capacity_combo.currentText()
+            qty = int(self.qty_spin.value())
+            if qty <= 0:
+                QMessageBox.warning(self, "Invalid Quantity", "Enter quantity greater than zero.")
+                return
+            self.initial_entries.append({'gas_type': gt, 'capacity': cap, 'quantity': qty})
+            self.refresh_initials_table()
+        add_btn.clicked.connect(add_entry)
+        row.addWidget(QLabel("Gas"))
+        row.addWidget(self.gas_combo)
+        row.addWidget(QLabel("Capacity"))
+        row.addWidget(self.capacity_combo)
+        row.addWidget(QLabel("Qty"))
+        row.addWidget(self.qty_spin)
+        row.addWidget(add_btn)
+        g_layout.addLayout(row)
+
+        self.initials_table = QTableWidget()
+        self.initials_table.setColumnCount(4)
+        self.initials_table.setHorizontalHeaderLabels(["Gas", "Capacity", "Quantity", "Remove"])
+        self.initials_table.setAlternatingRowColors(True)
+        self.initials_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.initials_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.initials_table.horizontalHeader().setStretchLastSection(True)
+        g_layout.addWidget(self.initials_table)
+
+        layout.addWidget(group)
         
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -57,6 +116,10 @@ class AddClientDialog(QDialog):
         self.phone_input.setText(self.client_data['phone'])
         self.address_input.setPlainText(self.client_data['address'] or '')
         self.company_input.setText(self.client_data['company'] or '')
+        try:
+            self.previous_balance_input.setValue(float(self.client_data.get('initial_previous_balance') or 0.0))
+        except Exception:
+            self.previous_balance_input.setValue(0.0)
     
     def get_client_data(self):
         """Get client data from form"""
@@ -64,7 +127,9 @@ class AddClientDialog(QDialog):
             'name': self.name_input.text().strip(),
             'phone': self.phone_input.text().strip(),
             'address': self.address_input.toPlainText().strip(),
-            'company': self.company_input.text().strip()
+            'company': self.company_input.text().strip(),
+            'previous_balance': float(self.previous_balance_input.value()),
+            'initial_outstanding': list(self.initial_entries)
         }
     
     def validate(self):
@@ -85,6 +150,20 @@ class AddClientDialog(QDialog):
     def accept(self):
         if self.validate():
             super().accept()
+
+    def refresh_initials_table(self):
+        self.initials_table.setRowCount(len(self.initial_entries))
+        for i, e in enumerate(self.initial_entries):
+            self.initials_table.setItem(i, 0, QTableWidgetItem(e['gas_type']))
+            self.initials_table.setItem(i, 1, QTableWidgetItem(e['capacity']))
+            self.initials_table.setItem(i, 2, QTableWidgetItem(str(e['quantity'])))
+            btn = QPushButton("Remove")
+            def remove_idx(idx=i):
+                if 0 <= idx < len(self.initial_entries):
+                    self.initial_entries.pop(idx)
+                    self.refresh_initials_table()
+            btn.clicked.connect(remove_idx)
+            self.initials_table.setCellWidget(i, 3, btn)
 
 class ClientsWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -298,8 +377,15 @@ class ClientsWidget(QWidget):
                     client_data['name'],
                     client_data['phone'],
                     client_data['address'],
-                    client_data['company']
+                    client_data['company'],
+                    client_data.get('previous_balance') or 0.0
                 )
+                initials = client_data.get('initial_outstanding') or []
+                for e in initials:
+                    try:
+                        self.db_manager.add_client_initial_outstanding(client_id, e['gas_type'], e['capacity'], int(e['quantity']))
+                    except Exception:
+                        continue
                 
                 self.db_manager.log_activity(
                     "ADD_CLIENT",
@@ -309,6 +395,17 @@ class ClientsWidget(QWidget):
                 
                 QMessageBox.information(self, "Success", "Client added successfully!")
                 self.load_clients()
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    mw = None
+                    for w in QApplication.topLevelWidgets():
+                        if hasattr(w, 'refresh_dashboard'):
+                            mw = w
+                            break
+                    if mw:
+                        mw.refresh_dashboard()
+                except Exception:
+                    pass
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to add client: {str(e)}")
@@ -324,7 +421,8 @@ class ClientsWidget(QWidget):
                     client_data['name'],
                     client_data['phone'],
                     client_data['address'],
-                    client_data['company']
+                    client_data['company'],
+                    client_data.get('previous_balance')
                 )
                 
                 if success:
