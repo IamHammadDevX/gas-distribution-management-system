@@ -871,44 +871,57 @@ class DatabaseManager:
         return True
 
     def get_cylinder_summary_for_client(self, client_id: int):
-        deliveries = self.execute_query('''
-            SELECT gp.gas_type, gp.capacity, COALESCE(SUM(gp.quantity),0) as delivered,
-                   COALESCE(prod.sub_type, '') as sub_type
-            FROM gate_passes gp
-            LEFT JOIN receipts r ON gp.receipt_id = r.id
-            LEFT JOIN sales s ON r.sale_id = s.id
-            LEFT JOIN gas_products prod ON s.gas_product_id = prod.id
-            WHERE gp.client_id = ?
-            GROUP BY gp.gas_type, prod.sub_type, gp.capacity
-        ''', (client_id,))
+        gp_rows = self.execute_query('SELECT id, receipt_id, gas_type, capacity, quantity FROM gate_passes WHERE client_id = ?', (client_id,))
+        agg_deliveries: Dict[tuple, Dict] = {}
+        for gp in gp_rows:
+            gt_raw = (gp.get('gas_type') or '').strip()
+            cap_raw = (gp.get('capacity') or '').strip()
+            if gt_raw == 'Multiple' or cap_raw == 'Multiple':
+                rid = gp.get('receipt_id')
+                sale_id = None
+                if rid:
+                    rows = self.execute_query('SELECT sale_id FROM receipts WHERE id = ?', (rid,))
+                    sale_id = rows[0]['sale_id'] if rows else None
+                items = self.get_sale_items(sale_id) if sale_id else []
+                for it in items:
+                    igt = (it.get('gas_type') or '').strip()
+                    icap_raw = (it.get('capacity') or '').strip()
+                    icap_norm = icap_raw.replace(' ', '').lower()
+                    if igt.upper() == 'LPG' and icap_norm in ('12kg', '15kg'):
+                        key = ('LPG', '12/15kg', it.get('sub_type') or '')
+                    elif igt.upper() == 'LPG' and icap_norm in ('45kg',):
+                        key = ('LPG', '45kg', it.get('sub_type') or '')
+                    else:
+                        key = (igt, icap_raw, it.get('sub_type') or '')
+                    prev = agg_deliveries.get(key)
+                    if prev:
+                        prev['delivered'] = int(prev['delivered']) + int(it.get('quantity') or 0)
+                    else:
+                        agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(it.get('quantity') or 0)}
+            else:
+                cap_norm = cap_raw.replace(' ', '').lower()
+                rows = self.execute_query('SELECT s.gas_product_id FROM receipts r JOIN sales s ON r.sale_id = s.id WHERE r.id = ?', (gp.get('receipt_id'),))
+                sub_type = ''
+                if rows:
+                    prod_rows = self.execute_query('SELECT sub_type FROM gas_products WHERE id = ?', (rows[0]['gas_product_id'],))
+                    sub_type = (prod_rows[0]['sub_type'] or '') if prod_rows else ''
+                if gt_raw.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                    key = ('LPG', '12/15kg', sub_type)
+                elif gt_raw.upper() == 'LPG' and cap_norm in ('45kg',):
+                    key = ('LPG', '45kg', sub_type)
+                else:
+                    key = (gt_raw, cap_raw, sub_type)
+                prev = agg_deliveries.get(key)
+                if prev:
+                    prev['delivered'] = int(prev['delivered']) + int(gp.get('quantity') or 0)
+                else:
+                    agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(gp.get('quantity') or 0)}
         initials = self.execute_query('''
             SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as delivered
             FROM client_initial_outstanding
             WHERE client_id = ?
             GROUP BY gas_type, capacity
         ''', (client_id,))
-        returns = self.execute_query('''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns
-            WHERE client_id = ?
-            GROUP BY gas_type, capacity
-        ''', (client_id,))
-        agg_deliveries: Dict[tuple, Dict] = {}
-        for d in deliveries:
-            gt = (d['gas_type'] or '').strip()
-            cap_raw = (d['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg', d.get('sub_type') or '')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg', d.get('sub_type') or '')
-            else:
-                key = (gt, cap_raw, d.get('sub_type') or '')
-            prev = agg_deliveries.get(key)
-            if prev:
-                prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
-            else:
-                agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(d['delivered'])}
         for d in initials:
             gt = (d['gas_type'] or '').strip()
             cap_raw = (d['capacity'] or '').strip()
@@ -924,6 +937,12 @@ class DatabaseManager:
                 prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
             else:
                 agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(d['delivered'])}
+        returns = self.execute_query('''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gas_type, capacity
+        ''', (client_id,))
         agg_returns: Dict[tuple, int] = {}
         for r in returns:
             gt = (r['gas_type'] or '').strip()
@@ -1086,38 +1105,70 @@ class DatabaseManager:
         return out
 
     def get_pending_capacity_map_for_client(self, client_id: int) -> Dict[str, List[str]]:
-        rows = self.execute_query('''
-            SELECT gas_type, capacity, COALESCE(SUM(qty),0) as delivered
-            FROM (
-                SELECT gp.gas_type as gas_type, gp.capacity as capacity, gp.quantity as qty
-                FROM gate_passes gp
-                WHERE gp.client_id = ?
-                UNION ALL
-                SELECT cio.gas_type as gas_type, cio.capacity as capacity, cio.quantity as qty
-                FROM client_initial_outstanding cio
-                WHERE cio.client_id = ?
-            ) X
-            GROUP BY gas_type, capacity
-        ''', (client_id, client_id))
-        rrows = self.execute_query('''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns
-            WHERE client_id = ?
-            GROUP BY gas_type, capacity
-        ''', (client_id,))
+        gp_rows = self.execute_query('SELECT id, receipt_id, gas_type, capacity, quantity FROM gate_passes WHERE client_id = ?', (client_id,))
+        dmap: Dict[tuple, int] = {}
+        for gp in gp_rows:
+            gt_raw = (gp.get('gas_type') or '').strip()
+            cap_raw = (gp.get('capacity') or '').strip()
+            if gt_raw == 'Multiple' or cap_raw == 'Multiple':
+                rid = gp.get('receipt_id')
+                sale_id = None
+                if rid:
+                    rows = self.execute_query('SELECT sale_id FROM receipts WHERE id = ?', (rid,))
+                    sale_id = rows[0]['sale_id'] if rows else None
+                items = self.get_sale_items(sale_id) if sale_id else []
+                for it in items:
+                    igt = (it.get('gas_type') or '').strip()
+                    icap_raw = (it.get('capacity') or '').strip()
+                    icap_norm = icap_raw.replace(' ', '').lower()
+                    if igt.upper() == 'LPG' and icap_norm in ('12kg', '15kg'):
+                        key = ('LPG', '12/15kg')
+                    elif igt.upper() == 'LPG' and icap_norm in ('45kg',):
+                        key = ('LPG', '45kg')
+                    else:
+                        key = (igt, icap_raw)
+                    dmap[key] = dmap.get(key, 0) + int(it.get('quantity') or 0)
+            else:
+                cap_norm = cap_raw.replace(' ', '').lower()
+                if gt_raw.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                    key = ('LPG', '12/15kg')
+                elif gt_raw.upper() == 'LPG' and cap_norm in ('45kg',):
+                    key = ('LPG', '45kg')
+                else:
+                    key = (gt_raw, cap_raw)
+                dmap[key] = dmap.get(key, 0) + int(gp.get('quantity') or 0)
+        init_rows = self.execute_query('SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as delivered FROM client_initial_outstanding WHERE client_id = ? GROUP BY gas_type, capacity', (client_id,))
+        for i in init_rows:
+            gt = (i['gas_type'] or '').strip()
+            cap_raw = (i['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg')
+            else:
+                key = (gt, cap_raw)
+            dmap[key] = dmap.get(key, 0) + int(i['delivered'])
+        rrows = self.execute_query('SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned FROM cylinder_returns WHERE client_id = ? GROUP BY gas_type, capacity', (client_id,))
         rmap: Dict[tuple, int] = {}
         for r in rrows:
-            rmap[(r['gas_type'], r['capacity'])] = int(r['returned'])
+            gt = (r['gas_type'] or '').strip()
+            cap_raw = (r['capacity'] or '').strip()
+            cap_norm = cap_raw.replace(' ', '').lower()
+            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
+                key = ('LPG', '12/15kg')
+            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
+                key = ('LPG', '45kg')
+            else:
+                key = (gt, cap_raw)
+            rmap[key] = int(r['returned'])
         out: Dict[str, List[str]] = {}
-        for row in rows:
-            gt = row['gas_type']
-            cap = row['capacity']
-            delivered = int(row['delivered'])
-            returned = rmap.get((gt, cap), 0)
+        for key, delivered in dmap.items():
+            returned = rmap.get(key, 0)
             if delivered > returned:
-                out.setdefault(gt, []).append(cap)
+                out.setdefault(key[0], []).append(key[1])
         for gt in list(out.keys()):
-            out[gt] = sorted(out[gt])
+            out[gt] = sorted(sorted(set(out[gt])))
         return out
 
     def get_empty_stock_by_category(self, day: Optional[str] = None) -> List[Dict]:

@@ -446,7 +446,7 @@ class ClientsWidget(QWidget):
         
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Client Details - {client['name']}")
-        dialog.setFixedSize(600, 500)
+        dialog.setFixedSize(750, 500)
         
         layout = QVBoxLayout(dialog)
         layout.setSpacing(15)
@@ -503,6 +503,43 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
             QMessageBox.warning(self, "Database Error", f"Failed to load purchase history: {str(e)}")
         
         layout.addWidget(purchases_table)
+        layout.addWidget(QLabel("<b>Empty Cylinders (Pending by Product):</b>"))
+        empties_table = QTableWidget()
+        empties_table.setColumnCount(6)
+        empties_table.setHorizontalHeaderLabels(["Gas Type", "Sub Type", "Capacity", "Delivered", "Returned", "Pending"])
+        empties_table.setAlternatingRowColors(True)
+        empties_table.setSelectionBehavior(QTableWidget.SelectRows)
+        empties_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        try:
+            summary = self.db_manager.get_cylinder_summary_for_client(client['id'])
+            empties_table.setRowCount(len(summary))
+            for i, s in enumerate(summary):
+                gt = s.get('gas_type') or ''
+                st = s.get('sub_type') or ''
+                cap = s.get('capacity') or ''
+                d = int(s.get('delivered') or 0)
+                r = int(s.get('returned') or 0)
+                rem = int(s.get('remaining') or 0)
+                empties_table.setItem(i, 0, QTableWidgetItem(gt))
+                empties_table.setItem(i, 1, QTableWidgetItem(st))
+                empties_table.setItem(i, 2, QTableWidgetItem(cap))
+                di = QTableWidgetItem(str(d))
+                di.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                empties_table.setItem(i, 3, di)
+                ri = QTableWidgetItem(str(r))
+                ri.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                empties_table.setItem(i, 4, ri)
+                remi = QTableWidgetItem(str(rem))
+                remi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if rem == 0:
+                    remi.setForeground(Qt.darkGreen)
+                else:
+                    remi.setForeground(Qt.red)
+                empties_table.setItem(i, 5, remi)
+            empties_table.resizeColumnsToContents()
+        except Exception as e:
+            QMessageBox.warning(self, "Database Error", f"Failed to load empties summary: {str(e)}")
+        layout.addWidget(empties_table)
         
         # Close button
         close_btn = QPushButton("Close")

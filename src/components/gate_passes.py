@@ -98,7 +98,7 @@ class GatePassDialog(QDialog):
         
         # Quantity
         self.quantity_spinbox = QSpinBox()
-        self.quantity_spinbox.setRange(1, 100)
+        self.quantity_spinbox.setRange(1, 100000)
         self.quantity_spinbox.setValue(1)
         self.quantity_spinbox.setMinimumWidth(120)
         self.quantity_spinbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -206,8 +206,27 @@ class GatePassDialog(QDialog):
             quantities = self.current_receipt.get('quantities_summary') or str(self.current_receipt.get('quantity') or '')
             # Compute totals and gas info from sale items
             total_qty, gas_type, capacity = self.compute_receipt_totals()
+            self.quantity_spinbox.setMaximum(int(total_qty) if int(total_qty) > 0 else 1)
             self.quantity_spinbox.setValue(max(1, int(total_qty)))
-            gas_info = f"Products: {products}\nQuantities: {quantities}\nSelected Gas: {gas_type} - {capacity}"
+            breakdown = ""
+            try:
+                items = self.db_manager.get_sale_items(self.current_receipt['sale_id'])
+                if items:
+                    parts = {}
+                    for it in items:
+                        label = f"{(it.get('gas_type') or '').strip()}{(' ' + it['sub_type']) if it.get('sub_type') else ''} {(it.get('capacity') or '').strip()}".strip()
+                        parts[label] = parts.get(label, 0) + int(it['quantity'])
+                    breakdown = ", ".join([f"{lbl} {qty}" for lbl, qty in parts.items()])
+                else:
+                    base_label = f"{(self.current_receipt.get('gas_type') or '').strip()} {(self.current_receipt.get('capacity') or '').strip()}".strip()
+                    qty = int(self.current_receipt.get('quantity') or 0)
+                    breakdown = f"{base_label} {qty}" if base_label else str(qty)
+            except Exception:
+                breakdown = ""
+            if gas_type == 'Multiple' and capacity == 'Multiple':
+                gas_info = f"Products: {products}\nQuantities: {quantities}\nBreakdown: {breakdown}"
+            else:
+                gas_info = f"Products: {products}\nQuantities: {quantities}\nSelected Gas: {gas_type} - {capacity}"
             self.gas_info_label.setText(gas_info)
     
     def load_gate_pass_data(self):
@@ -283,7 +302,7 @@ class GatePassDialog(QDialog):
     
     def compute_receipt_totals(self):
         """Compute total quantity and canonical gas type/capacity for this receipt.
-        If multiple products exist, use 'Mixed'/'Mixed'."""
+        If multiple products exist, return 'Multiple'/'Multiple'."""
         try:
             if not self.current_receipt:
                 return (1, 'Unknown', 'Unknown')
@@ -294,7 +313,7 @@ class GatePassDialog(QDialog):
             if len(keys) == 1 and keys:
                 gt, cap = next(iter(keys))
             else:
-                gt, cap = 'Mixed', 'Mixed'
+                gt, cap = 'Multiple', 'Multiple'
             # Cache for reuse in validate/get_gate_pass_data
             self._cached_gas_type = gt
             self._cached_capacity = cap
@@ -488,7 +507,20 @@ class GatePassesWidget(QWidget):
             self.gate_passes_table.setItem(row, 4, QTableWidgetItem(gate_pass['vehicle_number']))
             
             # Gas Type
-            gas_type_text = f"{gate_pass['gas_type']} - {gate_pass['capacity']}"
+            gt = (gate_pass.get('gas_type') or '').strip()
+            cap = (gate_pass.get('capacity') or '').strip()
+            if gt == 'Multiple' and cap == 'Multiple':
+                try:
+                    items = self.db_manager.get_sale_items(gate_pass['receipt_id'])
+                    parts = {}
+                    for it in items:
+                        label = f"{(it.get('gas_type') or '').strip()}{(' ' + it['sub_type']) if it.get('sub_type') else ''} {(it.get('capacity') or '').strip()}".strip()
+                        parts[label] = parts.get(label, 0) + int(it['quantity'])
+                    gas_type_text = ", ".join([f"{lbl} {qty}" for lbl, qty in parts.items()]) or 'Multiple'
+                except Exception:
+                    gas_type_text = 'Multiple'
+            else:
+                gas_type_text = f"{gt} - {cap}"
             self.gate_passes_table.setItem(row, 5, QTableWidgetItem(gas_type_text))
             
             # Quantity
