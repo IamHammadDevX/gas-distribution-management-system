@@ -397,6 +397,7 @@ class ClientsWidget(QWidget):
                 self.load_clients()
                 try:
                     from PySide6.QtWidgets import QApplication
+                    from src.components.cylinder_track import CylinderTrackWidget
                     mw = None
                     for w in QApplication.topLevelWidgets():
                         if hasattr(w, 'refresh_dashboard'):
@@ -404,6 +405,12 @@ class ClientsWidget(QWidget):
                             break
                     if mw:
                         mw.refresh_dashboard()
+                    for w in QApplication.topLevelWidgets():
+                        for ct in w.findChildren(CylinderTrackWidget):
+                            try:
+                                ct.load_clients()
+                            except Exception:
+                                pass
                 except Exception:
                     pass
                 
@@ -590,6 +597,17 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
                 
                 QMessageBox.information(self, "Success", "Client deleted successfully!")
                 self.load_clients()
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    from src.components.cylinder_track import CylinderTrackWidget
+                    for w in QApplication.topLevelWidgets():
+                        for ct in w.findChildren(CylinderTrackWidget):
+                            try:
+                                ct.load_clients()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to delete client: {str(e)}")

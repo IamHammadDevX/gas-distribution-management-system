@@ -47,7 +47,7 @@ class CylinderTrackWidget(QWidget):
         self.summary_table = QTableWidget()
         self.summary_table.setColumnCount(7)
         self.summary_table.setHorizontalHeaderLabels([
-            "Gas Type", "Sub Type", "Capacity", "Purchased", "Returned", "Status", "Return Now"
+            "Gas Type", "Sub Type", "Capacity", "Purchased", "Returned", "Pending", "Return Now"
         ])
         self.summary_table.setAlternatingRowColors(True)
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -191,12 +191,12 @@ class CylinderTrackWidget(QWidget):
             remaining = purchased - returned
             self.summary_table.setItem(i, 3, QTableWidgetItem(str(purchased)))
             self.summary_table.setItem(i, 4, QTableWidgetItem(str(returned)))
-            status_item = QTableWidgetItem(f"Pending ({remaining})")
+            pending_item = QTableWidgetItem(str(remaining))
             if remaining == 0:
-                status_item.setForeground(Qt.darkGreen)
+                pending_item.setForeground(Qt.darkGreen)
             else:
-                status_item.setForeground(Qt.red)
-            self.summary_table.setItem(i, 5, status_item)
+                pending_item.setForeground(Qt.red)
+            self.summary_table.setItem(i, 5, pending_item)
             btn = QPushButton("Return" if remaining > 0 else "Done")
             btn.setStyleSheet("""
                 QPushButton { background-color: #8e44ad; color: white; border: 1px solid #7d3c98; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
