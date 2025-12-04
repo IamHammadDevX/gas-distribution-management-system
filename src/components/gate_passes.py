@@ -171,13 +171,11 @@ class GatePassDialog(QDialog):
     def search_receipts(self):
         """Search receipts as user types"""
         search_text = self.receipt_search_input.text().strip()
-        if len(search_text) < 3:  # Only search if at least 3 characters
+        if len(search_text) < 3:
             return
-        
         try:
             receipts = self.db_manager.get_receipts_with_summaries(limit=10, search=search_text)
             receipts = [r for r in receipts if int(r.get('balance') or 0) == 0]
-            
             if receipts:
                 self.current_receipt = receipts[0]
                 self.update_receipt_info()
@@ -186,7 +184,6 @@ class GatePassDialog(QDialog):
                 self.client_info_label.setText("Client info will appear here")
                 self.gas_info_label.setText("Gas information will appear here")
                 self.current_receipt = None
-                
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to search receipts: {str(e)}")
     

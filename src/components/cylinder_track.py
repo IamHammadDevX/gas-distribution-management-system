@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QSpinBox, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QSpinBox, QMessageBox, QAbstractSpinBox
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
 
@@ -55,18 +55,9 @@ class CylinderTrackWidget(QWidget):
         self.summary_table.verticalHeader().setVisible(False)
         s_layout.addWidget(self.summary_table)
         layout.addWidget(summary_group)
-
-        type_group = QGroupBox("Empty Cylinders Summary (By Gas Type)")
-        t_layout = QVBoxLayout(type_group)
-        self.type_table = QTableWidget()
-        self.type_table.setColumnCount(4)
-        self.type_table.setHorizontalHeaderLabels(["Gas Type", "Delivered", "Returned", "Remaining"])
-        self.type_table.setAlternatingRowColors(True)
-        self.type_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.type_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.type_table.verticalHeader().setVisible(False)
-        t_layout.addWidget(self.type_table)
-        layout.addWidget(type_group)
+        self.client_combo.setToolTip("Select client to view and record cylinder returns")
+        refresh_btn.setToolTip("Refresh the selected client's cylinder return status")
+        self.summary_table.setToolTip("Each row shows a product: purchased, returned, and pending empty cylinders")
 
         # =========== Entry controls ===========
         entry_group = QGroupBox("Record Cylinder Return")
@@ -74,7 +65,12 @@ class CylinderTrackWidget(QWidget):
         self.gas_combo = QComboBox()
         self.capacity_combo = QComboBox()
         self.qty_spin = QSpinBox()
-        self.qty_spin.setRange(1, 1000)
+        self.qty_spin.setRange(0, 1000)
+        self.qty_spin.setReadOnly(False)
+        self.qty_spin.setAccelerated(True)
+        self.qty_spin.setEnabled(True)
+        self.qty_spin.setSingleStep(1)
+        self.qty_spin.setButtonSymbols(QAbstractSpinBox.UpDownArrows)
         save_btn = QPushButton("Save Return")
         save_btn.setStyleSheet("""
             QPushButton { background-color: #27ae60; color: white; border: 1px solid #229954; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
@@ -93,6 +89,10 @@ class CylinderTrackWidget(QWidget):
         e_layout.addWidget(QLabel("Quantity"))
         e_layout.addWidget(self.qty_spin)
         e_layout.addWidget(save_btn)
+        self.gas_combo.setToolTip("Select gas type for the return entry")
+        self.capacity_combo.setToolTip("Select cylinder capacity for the chosen gas type")
+        self.qty_spin.setToolTip("Auto-fills with pending quantity. Adjust down to record partial return")
+        save_btn.setToolTip("Record the cylinder return. Disabled if nothing pending for selection")
         layout.addWidget(entry_group)
 
         edit_group = QGroupBox("Edit Returned Total")
@@ -112,11 +112,18 @@ class CylinderTrackWidget(QWidget):
         save_edit_btn.clicked.connect(self.save_edit_return_total)
         ed_layout.addWidget(QLabel("Gas"))
         ed_layout.addWidget(self.edit_gas_combo)
+        self.edit_subtype_label = QLabel("")
+        ed_layout.addWidget(QLabel("Sub Type"))
+        ed_layout.addWidget(self.edit_subtype_label)
         ed_layout.addWidget(QLabel("Capacity"))
         ed_layout.addWidget(self.edit_capacity_combo)
         ed_layout.addWidget(QLabel("Total Returned"))
         ed_layout.addWidget(self.edit_total_spin)
         ed_layout.addWidget(save_edit_btn)
+        self.edit_gas_combo.setToolTip("Select gas type to edit total returned for that product")
+        self.edit_capacity_combo.setToolTip("Select capacity to edit total returned for the product")
+        self.edit_total_spin.setToolTip("Set the total cylinders returned. Cannot exceed delivered")
+        save_edit_btn.setToolTip("Update the total returned value for the selected product")
         layout.addWidget(edit_group)
 
     def load_clients(self):
@@ -167,6 +174,15 @@ class CylinderTrackWidget(QWidget):
         self.catalog_map = {gt: sorted(list(caps_norm)) for gt, caps_norm in cat_map_norm.items()}
         self.catalog_map_raw = {gt: sorted(list(caps_raw)) for gt, caps_raw in cat_map_raw.items()}
 
+        # Include client-only summary keys that may not exist in company catalog
+        for s in summary:
+            gt_s = (s.get('gas_type') or '').strip()
+            st_s = (s.get('sub_type') or '')
+            cp_s = s.get('capacity') or ''
+            key_s = (gt_s, cp_s, st_s)
+            if key_s not in cat_keys:
+                cat_keys.append(key_s)
+
         # Map summary to quick lookup
         sum_map = {}
         for s in summary:
@@ -176,6 +192,17 @@ class CylinderTrackWidget(QWidget):
                 'returned': int(s.get('returned') or 0)
             }
 
+        cap_totals = {}
+        for s in summary:
+            gt = (s.get('gas_type') or '')
+            cp = (s.get('capacity') or '')
+            d = int(s.get('delivered') or 0)
+            r = int(s.get('returned') or 0)
+            prev = cap_totals.get((gt, cp)) or {'delivered': 0, 'returned': 0}
+            prev['delivered'] += d
+            prev['returned'] = r if r > prev['returned'] else prev['returned']
+            cap_totals[(gt, cp)] = prev
+
         # Render table for all catalog products (initially zeros where absent)
         cat_keys.sort(key=lambda x: (x[0], x[2], x[1]))
         self.summary_table.setRowCount(len(cat_keys))
@@ -183,7 +210,7 @@ class CylinderTrackWidget(QWidget):
             self.summary_table.setItem(i, 0, QTableWidgetItem(gt))
             self.summary_table.setItem(i, 1, QTableWidgetItem(st))
             self.summary_table.setItem(i, 2, QTableWidgetItem(cp))
-            vals = sum_map.get((gt, cp, st)) or {'delivered': 0, 'returned': 0}
+            vals = sum_map.get((gt, cp, st)) or cap_totals.get((gt, cp)) or {'delivered': 0, 'returned': 0}
             purchased = int(vals['delivered'])
             returned = int(vals['returned'])
             if returned > purchased:
@@ -206,39 +233,24 @@ class CylinderTrackWidget(QWidget):
             btn.setMinimumWidth(80)
             btn.setFixedHeight(26)
             btn.setEnabled(remaining > 0)
+            btn.setToolTip("Start a return for this product; quantity auto-fills to pending" if remaining > 0 else "All cylinders returned for this product")
             btn.clicked.connect(lambda _, gi=i: self.start_return_from_row(gi))
             self.summary_table.setCellWidget(i, 6, btn)
-        # Type-level aggregation
-        type_map = {}
-        for s in summary:
-            gt = s['gas_type']
-            d = int(s['delivered'])
-            r = int(s['returned'])
-            prev = type_map.get(gt)
-            if prev:
-                prev['delivered'] += d
-                prev['returned'] += r
-            else:
-                type_map[gt] = {'delivered': d, 'returned': r}
-        types = sorted(list(type_map.keys()))
-        self.type_table.setRowCount(len(types))
-        for i, gt in enumerate(types):
-            d = type_map[gt]['delivered']
-            r = type_map[gt]['returned']
-            rem = d - r
-            self.type_table.setItem(i, 0, QTableWidgetItem(gt))
-            self.type_table.setItem(i, 1, QTableWidgetItem(str(d)))
-            self.type_table.setItem(i, 2, QTableWidgetItem(str(r)))
-            self.type_table.setItem(i, 3, QTableWidgetItem(str(rem)))
-        # populate return entry combos from full catalog (raw capacities)
         self.gas_combo.clear()
         self.gas_combo.addItems(sorted(list(self.catalog_map_raw.keys())))
         self.capacity_combo.clear()
         first_gas = self.gas_combo.currentText()
-        caps = sorted(self.catalog_map_raw.get(first_gas, []))
+        caps = []
+        try:
+            caps = sorted(self.pending_map.get(first_gas, [])) if hasattr(self, 'pending_map') else []
+        except Exception:
+            caps = []
+        if not caps:
+            caps = sorted(self.catalog_map_raw.get(first_gas, []))
         self.capacity_combo.addItems(caps)
         self.gas_combo.currentTextChanged.connect(self.update_return_capacities_from_map)
         self.capacity_combo.currentTextChanged.connect(self.update_return_qty_limit)
+        self.update_return_capacities_from_map()
         # populate edit combos for products (full catalog, raw capacities)
         gas_all = sorted(list(self.catalog_map_raw.keys()))
         self.edit_gas_combo.blockSignals(True)
@@ -254,7 +266,12 @@ class CylinderTrackWidget(QWidget):
 
     def start_return_from_row(self, row):
         gas = self.summary_table.item(row, 0).text()
+        st = self.summary_table.item(row, 1).text() if self.summary_table.item(row, 1) else ""
         cap = self.summary_table.item(row, 2).text()
+        pend_item = self.summary_table.item(row, 5)
+        if pend_item and int(pend_item.text() or '0') <= 0:
+            QMessageBox.information(self, "No Pending", "No pending cylinders for the selected product.")
+            return
         if gas.upper() == 'LPG' and cap.strip() == '12/15kg':
             caps = self.catalog_map_raw.get('LPG', []) if hasattr(self, 'catalog_map_raw') else []
             best_cap = None
@@ -262,6 +279,9 @@ class CylinderTrackWidget(QWidget):
             client = self.client_combo.currentData()
             if client:
                 for c in caps:
+                    cnorm = (c or '').replace(' ', '').lower()
+                    if cnorm not in ('12kg', '15kg'):
+                        continue
                     d_rows = self.db_manager.execute_query(
                         'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
                         (client['id'], gas, c)
@@ -282,9 +302,58 @@ class CylinderTrackWidget(QWidget):
                         best_remaining = remaining
                         best_cap = c
             cap = best_cap or (caps[0] if caps else cap)
+        if self.gas_combo.findText(gas) == -1:
+            self.gas_combo.addItem(gas)
         self.gas_combo.setCurrentText(gas)
+        if self.capacity_combo.findText(cap) == -1:
+            self.capacity_combo.addItem(cap)
         self.capacity_combo.setCurrentText(cap)
         self.update_return_qty_limit()
+        # If LPG 12/15 mapped to a raw capacity, set spin based on that capacity's true remaining
+        if gas.upper() == 'LPG' and cap:
+            client = self.client_combo.currentData()
+            if client:
+                d_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, cap)
+                )
+                i_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, cap)
+                )
+                r_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, cap)
+                )
+                delivered = int(d_rows[0]['total']) if d_rows else 0
+                initial_delivered = int(i_rows[0]['total']) if i_rows else 0
+                returned = int(r_rows[0]['total']) if r_rows else 0
+                rem = max(0, (delivered + initial_delivered) - returned)
+                self.qty_spin.setMinimum(1 if rem > 0 else 0)
+                self.qty_spin.setMaximum(rem)
+                self.qty_spin.setValue(rem if rem > 0 else 0)
+        self.qty_spin.setFocus()
+        try:
+            self.qty_spin.lineEdit().selectAll()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'edit_subtype_label'):
+                self.edit_subtype_label.setText(st or "")
+            if self.edit_gas_combo.findText(gas) == -1:
+                self.edit_gas_combo.addItem(gas)
+            self.edit_gas_combo.blockSignals(True)
+            self.edit_gas_combo.setCurrentText(gas)
+            self.edit_gas_combo.blockSignals(False)
+            self.update_edit_capacities()
+            if self.edit_capacity_combo.findText(cap) == -1:
+                self.edit_capacity_combo.addItem(cap)
+            self.edit_capacity_combo.blockSignals(True)
+            self.edit_capacity_combo.setCurrentText(cap)
+            self.edit_capacity_combo.blockSignals(False)
+            self.update_edit_spin_limits()
+        except Exception:
+            pass
 
     def save_return(self):
         client = self.client_combo.currentData()
@@ -292,6 +361,38 @@ class CylinderTrackWidget(QWidget):
             return
         gas = self.gas_combo.currentText()
         cap = self.capacity_combo.currentText()
+        if not gas or not cap:
+            QMessageBox.warning(self, "Invalid Selection", "Please select gas and capacity.")
+            return
+        if gas.upper() == 'LPG' and cap.strip() == '12/15kg':
+            caps = self.catalog_map_raw.get('LPG', []) if hasattr(self, 'catalog_map_raw') else []
+            best_cap = None
+            best_remaining = -1
+            for c in caps:
+                cnorm = (c or '').replace(' ', '').lower()
+                if cnorm not in ('12kg', '15kg'):
+                    continue
+                d_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, c)
+                )
+                i_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, c)
+                )
+                r_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (client['id'], gas, c)
+                )
+                delivered = int(d_rows[0]['total']) if d_rows else 0
+                initial_delivered = int(i_rows[0]['total']) if i_rows else 0
+                returned = int(r_rows[0]['total']) if r_rows else 0
+                remaining_c = (delivered + initial_delivered) - returned
+                if remaining_c > best_remaining:
+                    best_remaining = remaining_c
+                    best_cap = c
+            if best_cap:
+                cap = best_cap
         qty = int(self.qty_spin.value())
         # Validate remaining directly from DB for selected gas/capacity
         d_rows = self.db_manager.execute_query(
@@ -326,7 +427,13 @@ class CylinderTrackWidget(QWidget):
 
     def update_return_capacities_from_map(self):
         g = self.gas_combo.currentText()
-        caps = sorted(self.catalog_map_raw.get(g, []))
+        caps = []
+        try:
+            caps = sorted(self.pending_map.get(g, [])) if hasattr(self, 'pending_map') else []
+        except Exception:
+            caps = []
+        if not caps:
+            caps = sorted(self.catalog_map_raw.get(g, []))
         self.capacity_combo.blockSignals(True)
         self.capacity_combo.clear()
         self.capacity_combo.addItems(caps)
@@ -339,6 +446,35 @@ class CylinderTrackWidget(QWidget):
         current = self.client_combo.currentData()
         if not current or not g or not c:
             return
+        if g.upper() == 'LPG' and c.strip() == '12/15kg':
+            caps = [cap for cap in self.catalog_map_raw.get('LPG', []) if (cap or '').replace(' ', '').lower() in ('12kg','15kg')]
+            best_cap = None
+            best_remaining = -1
+            for rc in caps:
+                d_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (current['id'], g, rc)
+                )
+                i_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (current['id'], g, rc)
+                )
+                r_rows = self.db_manager.execute_query(
+                    'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
+                    (current['id'], g, rc)
+                )
+                delivered = int(d_rows[0]['total']) if d_rows else 0
+                initial_delivered = int(i_rows[0]['total']) if i_rows else 0
+                returned = int(r_rows[0]['total']) if r_rows else 0
+                remaining_rc = (delivered + initial_delivered) - returned
+                if remaining_rc > best_remaining:
+                    best_remaining = remaining_rc
+                    best_cap = rc
+            if best_cap:
+                if self.capacity_combo.findText(best_cap) == -1:
+                    self.capacity_combo.addItem(best_cap)
+                self.capacity_combo.setCurrentText(best_cap)
+                c = best_cap
         client_id = current['id']
         d_rows = self.db_manager.execute_query(
             'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
@@ -356,7 +492,7 @@ class CylinderTrackWidget(QWidget):
         initial_delivered = int(i_rows[0]['total']) if i_rows else 0
         returned = int(r_rows[0]['total']) if r_rows else 0
         rem = max(0, (delivered + initial_delivered) - returned)
-        self.qty_spin.setMinimum(0)
+        self.qty_spin.setMinimum(1 if rem > 0 else 0)
         self.qty_spin.setMaximum(rem)
         self.qty_spin.setValue(rem if rem > 0 else 0)
         if hasattr(self, 'save_btn'):
