@@ -719,6 +719,17 @@ class GatePassesWidget(QWidget):
                 
                 QMessageBox.information(self, "Success", "Gate pass updated successfully!")
                 self.load_gate_passes()
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    mw = None
+                    for w in QApplication.topLevelWidgets():
+                        if hasattr(w, 'refresh_dashboard'):
+                            mw = w
+                            break
+                    if mw:
+                        mw.refresh_dashboard()
+                except Exception:
+                    pass
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to update gate pass: {str(e)}")
@@ -757,6 +768,17 @@ class GatePassesWidget(QWidget):
                 
                 QMessageBox.information(self, "Success", "Gate pass marked as returned!")
                 self.load_gate_passes()
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    mw = None
+                    for w in QApplication.topLevelWidgets():
+                        if hasattr(w, 'refresh_dashboard'):
+                            mw = w
+                            break
+                    if mw:
+                        mw.refresh_dashboard()
+                except Exception:
+                    pass
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to mark as returned: {str(e)}")

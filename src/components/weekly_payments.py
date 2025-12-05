@@ -1,12 +1,13 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox, QDialog, QTextEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox, QDialog, QTextEdit, QLineEdit, QFormLayout, QDoubleSpinBox
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout
 from src.database_module import DatabaseManager
 
 class WeeklyClientReceiptDialog(QDialog):
-    def __init__(self, invoice_row: dict, parent=None):
+    def __init__(self, db_manager: DatabaseManager, invoice_row: dict, parent=None):
         super().__init__(parent)
+        self.db_manager = db_manager
         self.invoice = invoice_row
         self.setWindowTitle(f"Weekly Receipt - {invoice_row.get('receipt_number') or invoice_row.get('invoice_number')}")
         self.setFixedSize(600, 540)
@@ -56,6 +57,10 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
 .tbl th, .tbl td { border: 1px solid #000; padding: 6px 8px; text-align: center; }
 .bill { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .bill td { border: 1.5px solid #000; padding: 6px 10px; font-weight: 700; text-align: center; }
+.items { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+.items th, .items td { border: 1px solid #333; padding: 5px 6px; text-align: center; }
+.history { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+.history th, .history td { border: 1px solid #333; padding: 5px 6px; text-align: center; }
 .footer { text-align:center; font-size: 13px; margin-top: 12px; border-top: 2px solid #444; padding-top: 8px; }
 .signature { text-align:right; font-size: 15px; font-style: italic; margin-top: 14px; }
         """
@@ -65,6 +70,14 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
         ref = self.invoice.get('receipt_number') or self.invoice.get('invoice_number')
         company = self.invoice.get('client_company') or ''
         phone = self.invoice.get('client_phone') or ''
+        items = self.db_manager.get_client_weekly_items(self.invoice['client_id'], ws, we)
+        pays = self.db_manager.get_weekly_payment_history(self.invoice['id'])
+        items_rows = []
+        for it in items:
+            items_rows.append(f"<tr><td>{it['date']}</td><td>{it['gas_type']} {it['sub_type']} {it['capacity']}</td><td>{int(it['quantity'])}</td><td>{float(it['unit_price']):,.2f}</td><td>{float(it['subtotal']):,.2f}</td><td>{float(it['tax_amount']):,.2f}</td><td>{float(it['total_amount']):,.2f}</td></tr>")
+        pays_rows = []
+        for p in pays:
+            pays_rows.append(f"<tr><td>{p['payment_date']}</td><td>{float(p['amount']):,.2f}</td><td>{p['payment_method']}</td><td>{p['created_at']}</td></tr>")
         return f"""
 <html><head><style>{style}</style></head><body>
 <div class='page'>
@@ -92,11 +105,21 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
       <td>{float(self.invoice['total_payable']):,.2f}</td>
     </tr>
   </table>
+  <div style='font-weight:800; margin-top:10px;'>Itemized Purchases</div>
+  <table class='items'>
+    <tr><th>Date</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr>
+    {''.join(items_rows) if items_rows else '<tr><td colspan=7>No purchases this week</td></tr>'}
+  </table>
   <table class='bill'>
     <tr><td>Previous Balance</td><td>{float(self.invoice['previous_balance']):,.2f}</td></tr>
     <tr><td>Final Payable</td><td>{float(self.invoice['final_payable']):,.2f}</td></tr>
     <tr><td>Paid Amount</td><td>{float(self.invoice['amount_paid']):,.2f}</td></tr>
     <tr><td>Remaining Balance</td><td>{max(0.0, float(self.invoice['final_payable']) - float(self.invoice['amount_paid'])):,.2f}</td></tr>
+  </table>
+  <div style='font-weight:800; margin-top:10px;'>Payment History</div>
+  <table class='history'>
+    <tr><th>Date</th><th>Amount</th><th>Method</th><th>Recorded</th></tr>
+    {''.join(pays_rows) if pays_rows else '<tr><td colspan=4>No payments recorded</td></tr>'}
   </table>
   <div class='signature'>Signature________________</div>
   <div class='footer'>This is an auto-generated weekly receipt.</div>
@@ -160,6 +183,26 @@ class WeeklyPaymentsWidget(QWidget):
         self.end_day_combo.currentTextChanged.connect(self.load_weekly_invoices)
         bar.addWidget(QLabel("Week end:"))
         bar.addWidget(self.end_day_combo)
+        self.client_filter = QComboBox()
+        self.client_filter.addItem("All Clients", None)
+        for c in self.db_manager.get_clients():
+            self.client_filter.addItem(c['name'], c['id'])
+        self.client_filter.currentIndexChanged.connect(self.load_weekly_invoices)
+        bar.addWidget(QLabel("Client:"))
+        bar.addWidget(self.client_filter)
+        self.status_filter = QComboBox()
+        self.status_filter.addItems(["All", "PAID", "UNPAID"])
+        self.status_filter.currentTextChanged.connect(self.load_weekly_invoices)
+        bar.addWidget(QLabel("Status:"))
+        bar.addWidget(self.status_filter)
+        self.min_remaining = QLineEdit()
+        self.min_remaining.setPlaceholderText("Min Remaining")
+        self.min_remaining.textChanged.connect(self.load_weekly_invoices)
+        self.max_remaining = QLineEdit()
+        self.max_remaining.setPlaceholderText("Max Remaining")
+        self.max_remaining.textChanged.connect(self.load_weekly_invoices)
+        bar.addWidget(self.min_remaining)
+        bar.addWidget(self.max_remaining)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.load_weekly_invoices)
         bar.addWidget(refresh_btn)
@@ -170,14 +213,14 @@ class WeeklyPaymentsWidget(QWidget):
         group = QGroupBox("Weekly Billing Details")
         g_layout = QVBoxLayout(group)
         self.table = QTableWidget()
-        self.table.setColumnCount(12)
+        self.table.setColumnCount(13)
         self.table.setHorizontalHeaderLabels([
-            "Client", "Cylinders", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Status", "Actions", "Week"
+            "Client", "Cylinders", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Remaining", "Status", "Actions", "Week"
         ])
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setColumnWidth(10, 360)
+        self.table.setColumnWidth(11, 360)
         g_layout.addWidget(self.table)
         layout.addWidget(group)
 
@@ -203,6 +246,30 @@ class WeeklyPaymentsWidget(QWidget):
             except Exception:
                 continue
         rows = self.db_manager.get_weekly_invoices(ws, we)
+        cid = self.client_filter.currentData()
+        if cid:
+            rows = [r for r in rows if r['client_id'] == cid]
+        st = self.status_filter.currentText()
+        if st in ("PAID", "UNPAID"):
+            rows = [r for r in rows if r['status'] == st]
+        try:
+            mn = float(self.min_remaining.text()) if self.min_remaining.text().strip() else None
+        except Exception:
+            mn = None
+        try:
+            mx = float(self.max_remaining.text()) if self.max_remaining.text().strip() else None
+        except Exception:
+            mx = None
+        if mn is not None or mx is not None:
+            frows = []
+            for r in rows:
+                rem = max(0.0, float(r['final_payable']) - float(r['amount_paid']))
+                if mn is not None and rem < mn:
+                    continue
+                if mx is not None and rem > mx:
+                    continue
+                frows.append(r)
+            rows = frows
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             client_text = r['client_name']
@@ -217,17 +284,19 @@ class WeeklyPaymentsWidget(QWidget):
             self.table.setItem(i, 6, QTableWidgetItem(f"Rs. {float(r['previous_balance']):,.2f}"))
             self.table.setItem(i, 7, QTableWidgetItem(f"Rs. {float(r['final_payable']):,.2f}"))
             self.table.setItem(i, 8, QTableWidgetItem(f"Rs. {float(r['amount_paid']):,.2f}"))
+            remaining_val = max(0.0, float(r['final_payable']) - float(r['amount_paid']))
+            self.table.setItem(i, 9, QTableWidgetItem(f"Rs. {remaining_val:,.2f}"))
             status_item = QTableWidgetItem(r['status'])
             if r['status'] == 'PAID':
                 status_item.setForeground(Qt.darkGreen)
             else:
                 status_item.setForeground(Qt.red)
-            self.table.setItem(i, 9, status_item)
+            self.table.setItem(i, 10, status_item)
             actions = QWidget()
             h = QHBoxLayout(actions)
             h.setContentsMargins(5, 5, 5, 5)
             h.setSpacing(6)
-            btn_print = QPushButton("Print Client Details")
+            btn_print = QPushButton("View Details")
             btn_print.setStyleSheet(
                 """
                 QPushButton { background-color: #f39c12; color: white; border: 1px solid #d68910; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 700; }
@@ -262,29 +331,53 @@ class WeeklyPaymentsWidget(QWidget):
             )
             btn_mark.setMinimumWidth(160)
             btn_mark.setFixedHeight(40)
-            btn_mark.setEnabled(max(0.0, float(r['final_payable']) - float(r['amount_paid'])) == 0.0 and r['status'] != 'PAID')
+            btn_mark.setEnabled(max(0.0, float(r['final_payable']) - float(r['amount_paid'])) <= 0.01 and r['status'] != 'PAID')
             btn_mark.clicked.connect(lambda checked=False, row=r: self.mark_paid(row))
             h.addWidget(btn_mark)
             actions.setLayout(h)
-            self.table.setCellWidget(i, 10, actions)
-            self.table.setItem(i, 11, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
+            self.table.setCellWidget(i, 11, actions)
+            self.table.setItem(i, 12, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
 
     def print_client(self, invoice_row: dict):
-        dlg = WeeklyClientReceiptDialog(invoice_row, self)
+        dlg = WeeklyClientReceiptDialog(self.db_manager, invoice_row, self)
         dlg.exec()
 
     def record_payment(self, invoice_row: dict):
-        from PySide6.QtWidgets import QInputDialog
         remaining = max(0.0, float(invoice_row['final_payable']) - float(invoice_row['amount_paid']))
         if remaining <= 0:
             QMessageBox.information(self, "Info", "No remaining balance.")
             return
-        amount, ok = QInputDialog.getDouble(self, "Record Payment", f"Enter payment amount for {invoice_row['client_name']}", 0.0, 0.0, float(remaining), 2)
-        if not ok:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Record Payment")
+        f = QFormLayout(dlg)
+        amt = QDoubleSpinBox()
+        amt.setMaximum(remaining)
+        amt.setDecimals(2)
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDate(QDate.currentDate())
+        method = QComboBox()
+        method.addItems(["Cash", "Bank Transfer", "Cheque", "Other"])
+        ok_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        h = QHBoxLayout()
+        h.addWidget(ok_btn)
+        h.addWidget(cancel_btn)
+        f.addRow("Amount", amt)
+        f.addRow("Date", date_edit)
+        f.addRow("Method", method)
+        f.addRow(h)
+        ok_btn.clicked.connect(dlg.accept)
+        cancel_btn.clicked.connect(dlg.reject)
+        if not dlg.exec():
+            return
+        amount = float(amt.value())
+        if amount <= 0:
+            QMessageBox.warning(self, "Invalid", "Amount must be greater than zero.")
             return
         try:
-            day = QDate.currentDate().toString('yyyy-MM-dd')
-            self.db_manager.record_weekly_payment(invoice_row['id'], float(amount), day, self.current_user.get('id'))
+            day = date_edit.date().toString('yyyy-MM-dd')
+            self.db_manager.record_weekly_payment(invoice_row['id'], amount, day, self.current_user.get('id'), method.currentText())
             QMessageBox.information(self, "Success", "Payment recorded.")
             self.load_weekly_invoices()
             try:
@@ -334,7 +427,7 @@ class WeeklyPaymentsWidget(QWidget):
             html = [
                 f"<h2 style='text-align:center; font-size:16pt;'>Weekly Billing List - {ws} to {we}</h2>",
                 "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
-                "<tr><th>Client</th><th>Cylinders</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Status</th></tr>"
+                "<tr><th>Client</th><th>Cylinders</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Remaining</th><th>Status</th></tr>"
             ]
             for i in range(self.table.rowCount()):
                 client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""
@@ -346,8 +439,9 @@ class WeeklyPaymentsWidget(QWidget):
                 prev = self.table.item(i, 6).text() if self.table.item(i, 6) else ""
                 final = self.table.item(i, 7).text() if self.table.item(i, 7) else ""
                 paid = self.table.item(i, 8).text() if self.table.item(i, 8) else ""
-                status = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
-                html.append(f"<tr><td>{client}</td><td>{cyl}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{status}</td></tr>")
+                remaining = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
+                status = self.table.item(i, 10).text() if self.table.item(i, 10) else ""
+                html.append(f"<tr><td>{client}</td><td>{cyl}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td>{status}</td></tr>")
             html.append("</table>")
             doc = QTextDocument()
             doc.setDefaultFont(QFont("Arial", 10))
