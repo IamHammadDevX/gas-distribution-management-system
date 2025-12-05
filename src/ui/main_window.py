@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
             ("Sales", "sales"),
             ("Receipts", "receipts"),
             ("Gate Passes", "gate_passes"),
+            ("Cylinder Track", "cylinder_track"),
             ("Daily Transactions", "daily_transactions"),
             ("Weekly Payments", "weekly_payments"),
             ("Vehicle Expenses", "vehicle_expenses"),
@@ -315,7 +316,11 @@ class MainWindow(QMainWindow):
         self.widgets["daily_transactions"] = daily_widget
         self.content_area.addWidget(daily_widget)
 
-        # Cylinder Track widget removed
+        # Cylinder Track widget
+        from src.components.cylinder_track import CylinderTrackWidget
+        cylinder_widget = CylinderTrackWidget(self.db_manager, self.current_user)
+        self.widgets["cylinder_track"] = cylinder_widget
+        self.content_area.addWidget(cylinder_widget)
 
         # Vehicle Expenses widget
         from src.components.vehicle_expenses import VehicleExpensesWidget
@@ -523,19 +528,10 @@ class MainWindow(QMainWindow):
         result = self.db_manager.execute_query(query, (today_str,))
         cylinders_in_today = result[0]['total'] if result else 0
 
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes'
-        result = self.db_manager.execute_query(query)
-        total_delivered = int(result[0]['total']) if result else 0
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM client_initial_outstanding'
-        result = self.db_manager.execute_query(query)
-        total_initial_outstanding = int(result[0]['total']) if result else 0
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes WHERE time_in IS NOT NULL'
-        result = self.db_manager.execute_query(query)
-        total_returned = int(result[0]['total']) if result else 0
-        pending_cylinders = int(total_delivered) + int(total_initial_outstanding) - int(total_returned)
-
-        # Total cylinders in (returned)
-        total_cylinders_in = int(total_returned)
+        totals = self.db_manager.get_total_cylinder_stats()
+        total_delivered = int(totals['total_delivered'])
+        total_cylinders_in = int(totals['total_returned'])
+        pending_cylinders = int(totals['total_pending'])
         
         return {
             'total_clients': total_clients,
@@ -616,9 +612,9 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'gate_passes', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'gate_passes', 'cylinder_track', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'cylinder_track', 'reports']
         elif role == 'Gate Operator':
             enabled_modules = ['dashboard', 'daily_transactions', 'gate_passes']
         elif role == 'Driver':
@@ -652,6 +648,7 @@ class MainWindow(QMainWindow):
                 "weekly_payments": "Weekly Payments",
                 "vehicle_expenses": "Vehicle Expenses",
                 "gate_passes": "Gate Passes",
+                "cylinder_track": "Cylinder Track",
                 "employees": "Employee Management",
                 "reports": "Reports",
                 "settings": "Settings"
@@ -696,6 +693,9 @@ class MainWindow(QMainWindow):
             elif page_name == "settings":
                 if hasattr(self.widgets['settings'], 'load_settings'):
                     self.widgets['settings'].load_settings()
+            elif page_name == "cylinder_track":
+                if hasattr(self.widgets['cylinder_track'], 'refresh_data'):
+                    self.widgets['cylinder_track'].refresh_data()
         except Exception as e:
             print(f"Error refreshing {page_name}: {str(e)}")
     

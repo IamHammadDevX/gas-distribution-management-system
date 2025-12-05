@@ -246,6 +246,18 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cylinder_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    client_id INTEGER NOT NULL,
+                    gas_type TEXT NOT NULL,
+                    sub_type TEXT,
+                    capacity TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (client_id) REFERENCES clients (id)
+                )
+            ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)')
@@ -775,17 +787,21 @@ class DatabaseManager:
         return self.execute_update(query, (gate_pass_number, receipt_id, client_id, driver_name,
                                           vehicle_number, gas_type, capacity, quantity, gate_operator_id, expected_time_in))
 
-    def add_cylinder_return(self, client_id: int, gas_type: str, capacity: str, quantity: int, gate_pass_id: Optional[int] = None) -> int:
-        raise NotImplementedError("Cylinder returns feature removed")
+    pass
 
     def get_return_rows_for_client_product(self, client_id: int, gas_type: str, capacity: str) -> List[Dict]:
-        raise NotImplementedError("Cylinder returns feature removed")
+        return self.execute_query(
+            'SELECT * FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ? ORDER BY created_at DESC',
+            (client_id, gas_type, capacity)
+        )
 
     def update_total_return_for_client_product(self, client_id: int, gas_type: str, capacity: str, new_total: int) -> bool:
-        raise NotImplementedError("Cylinder returns feature removed")
+        # Kept for backward compatibility; we maintain per-entry rows so no aggregate row to update.
+        # This method performs no-op and returns True if parameters are valid.
+        return True
 
     def get_cylinder_summary_for_client(self, client_id: int):
-        raise NotImplementedError("Cylinder returns feature removed")
+        return self.get_client_cylinder_status(client_id)
 
     def add_vehicle_expense(self, driver_id: Optional[int], driver_name: str, vehicle_number: str, expense_type: str, amount: float, notes: str, expense_date):
         query = '''
@@ -801,7 +817,10 @@ class DatabaseManager:
         return self.execute_query(query, (day,))
 
     def get_client_deliveries_with_returns(self, client_id: int) -> List[Dict]:
-        raise NotImplementedError("Cylinder returns feature removed")
+        rows = self.get_client_cylinder_status(client_id)
+        for r in rows:
+            r['status'] = 'Done' if int(r['pending']) <= 0 else 'Pending'
+        return rows
 
     def auto_mark_due_returns(self) -> int:
         raise NotImplementedError("Cylinder returns feature removed")
@@ -888,51 +907,135 @@ class DatabaseManager:
 
     def get_all_company_products(self):
         """Return all gas products with type, sub_type, capacity."""
-        return self.execute_query("""
+        return self.execute_query(
+            '''
             SELECT gas_type, sub_type, capacity
             FROM gas_products
             WHERE is_active = 1
             ORDER BY gas_type, sub_type, capacity
-        """)
+            '''
+        )
 
     def get_client_cylinder_status(self, client_id: int):
         """
         List all company products with delivered, returned, and pending counts for this client.
+        Delivered = initial outstanding + sum of sales quantities for the product
+        Returned = sum of cylinder_returns quantities (plus gate_passes time_in as additional returns)
+        Pending = Delivered - Returned
         Returns: list of dict with gas_type, sub_type, capacity, delivered, returned, pending.
         """
-        # Build all company products as keys
         prods = self.get_all_company_products()
         keys = [(p['gas_type'], p['sub_type'], p['capacity']) for p in prods]
 
-        # Delivered per product/capacity
-        deliveries = self.execute_query("""
-            SELECT gas_type, capacity, 
-            (SELECT sub_type FROM gas_products WHERE gas_products.gas_type=gp.gas_type AND gas_products.capacity=gp.capacity LIMIT 1) as sub_type,
-            COALESCE(SUM(quantity),0) as delivered
-            FROM gate_passes gp WHERE client_id=? 
+        init_rows = self.execute_query(
+            '''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            FROM client_initial_outstanding
+            WHERE client_id = ?
             GROUP BY gas_type, capacity
-        """, (client_id,))
-        delivered_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['delivered']) for x in deliveries}
+            ''',
+            (client_id,)
+        )
+        init_map = {(r['gas_type'], r['capacity']): int(r['qty']) for r in init_rows}
 
-        # Returned per product/capacity
-        returns = self.execute_query("""
-            SELECT gas_type, capacity,
-            (SELECT sub_type FROM gas_products WHERE gas_products.gas_type=cr.gas_type AND gas_products.capacity=cr.capacity LIMIT 1) as sub_type,
-            COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns cr WHERE client_id=?
+        sale_items = self.execute_query(
+            '''
+            SELECT gp.gas_type, gp.sub_type, gp.capacity, COALESCE(SUM(si.quantity),0) AS qty
+            FROM sale_items si
+            JOIN sales s ON si.sale_id = s.id
+            JOIN gas_products gp ON si.gas_product_id = gp.id
+            WHERE s.client_id = ?
+            GROUP BY gp.gas_type, gp.sub_type, gp.capacity
+            ''',
+            (client_id,)
+        )
+        delivered_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in sale_items}
+
+        returns = self.execute_query(
+            '''
+            SELECT gas_type, sub_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            FROM cylinder_returns
+            WHERE client_id = ?
+            GROUP BY gas_type, sub_type, capacity
+            ''',
+            (client_id,)
+        )
+        returned_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in returns}
+
+        # Include gate_passes time_in as additional returns if present
+        gp_returns = self.execute_query(
+            '''
+            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            FROM gate_passes
+            WHERE client_id = ? AND time_in IS NOT NULL
             GROUP BY gas_type, capacity
-        """, (client_id,))
-        returned_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['returned']) for x in returns}
+            ''',
+            (client_id,)
+        )
+        for gr in gp_returns:
+            key_variants = [
+                (gr['gas_type'], gr.get('sub_type'), gr['capacity']),
+                (gr['gas_type'], None, gr['capacity'])
+            ]
+            for k in key_variants:
+                returned_map[k] = returned_map.get(k, 0) + int(gr['qty'])
 
-        # Build output
         rows = []
         for (gas_type, sub_type, cap) in keys:
-            delivered = delivered_map.get((gas_type, sub_type, cap), 0)
+            delivered = delivered_map.get((gas_type, sub_type, cap), 0) + init_map.get((gas_type, cap), 0)
             returned = returned_map.get((gas_type, sub_type, cap), 0)
             pending = max(0, delivered - returned)
-            rows.append(dict(gas_type=gas_type, sub_type=sub_type, capacity=cap,
-                            delivered=delivered, returned=returned, pending=pending))
+            rows.append({
+                'gas_type': gas_type,
+                'sub_type': sub_type,
+                'capacity': cap,
+                'delivered': delivered,
+                'returned': returned,
+                'pending': pending
+            })
         return rows
 
     def add_cylinder_return(self, client_id: int, gas_type: str, sub_type: str, capacity: str, quantity: int):
-        raise NotImplementedError("Cylinder returns feature removed")
+        query = '''
+            INSERT INTO cylinder_returns (client_id, gas_type, sub_type, capacity, quantity)
+            VALUES (?, ?, ?, ?, ?)
+        '''
+        return self.execute_update(query, (client_id, gas_type, sub_type, capacity, int(quantity)))
+
+    def get_total_cylinder_stats(self) -> Dict[str, int]:
+        init_total_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM client_initial_outstanding')
+        init_total = int(init_total_rows[0]['total']) if init_total_rows else 0
+        delivered_rows = self.execute_query(
+            '''
+            SELECT COALESCE(SUM(si.quantity),0) AS total
+            FROM sale_items si
+            '''
+        )
+        delivered_total = int(delivered_rows[0]['total']) if delivered_rows else 0
+        returned_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM cylinder_returns')
+        returned_total = int(returned_rows[0]['total']) if returned_rows else 0
+        # Also include gate_passes time_in
+        gp_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM gate_passes WHERE time_in IS NOT NULL')
+        returned_total += int(gp_rows[0]['total']) if gp_rows else 0
+        pending_total = max(0, init_total + delivered_total - returned_total)
+        return {
+            'total_delivered': init_total + delivered_total,
+            'total_returned': returned_total,
+            'total_pending': pending_total
+        }
+
+    def get_pending_cylinder_summary_by_client(self) -> List[Dict]:
+        clients = self.get_clients()
+        result: List[Dict] = []
+        for c in clients:
+            rows = self.get_client_cylinder_status(c['id'])
+            pending_sum = sum(int(r['pending']) for r in rows)
+            result.append({
+                'client_id': c['id'],
+                'name': c['name'],
+                'phone': c['phone'],
+                'company': c.get('company'),
+                'pending_cylinders': pending_sum
+            })
+        result.sort(key=lambda x: x['pending_cylinders'], reverse=True)
+        return result

@@ -39,7 +39,8 @@ class ReportsWidget(QWidget):
             "Gate Activity Report",
             "Employee Report",
             "Gas Type Summary",
-            "Client Summary"
+            "Client Summary",
+            "Pending Cylinder Summary by Client"
         ])
         self.report_type_combo.currentTextChanged.connect(self.on_report_type_changed)
         report_layout.addWidget(self.report_type_combo)
@@ -158,6 +159,8 @@ class ReportsWidget(QWidget):
                 self.generate_gas_type_summary()
             elif report_type == "Client Summary":
                 self.generate_client_summary()
+            elif report_type == "Pending Cylinder Summary by Client":
+                self.generate_pending_cylinder_summary_report()
             
         except Exception as e:
             QMessageBox.critical(self, "Report Error", f"Failed to generate report: {str(e)}")
@@ -440,6 +443,30 @@ Clients with Outstanding Balance: {clients_with_balance}
                 balance_item.setForeground(Qt.red)
             self.report_table.setItem(row, 5, balance_item)
         
+        self.report_table.resizeColumnsToContents()
+
+    def generate_pending_cylinder_summary_report(self):
+        """Generate pending cylinder summary by client"""
+        rows = self.db_manager.get_pending_cylinder_summary_by_client()
+        total_pending = sum(r['pending_cylinders'] for r in rows)
+        with_pending = len([r for r in rows if r['pending_cylinders'] > 0])
+        summary = f"""
+PENDING CYLINDER SUMMARY BY CLIENT
+Total Pending Cylinders: {total_pending}
+Clients with Pending Cylinders: {with_pending}
+        """
+        self.summary_text.setPlainText(summary.strip())
+        self.report_table.setColumnCount(4)
+        self.report_table.setHorizontalHeaderLabels(["Client", "Phone", "Company", "Pending Cylinders"])
+        self.report_table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            self.report_table.setItem(i, 0, QTableWidgetItem(r['name']))
+            self.report_table.setItem(i, 1, QTableWidgetItem(r['phone']))
+            self.report_table.setItem(i, 2, QTableWidgetItem(r.get('company') or ''))
+            item = QTableWidgetItem(str(int(r['pending_cylinders'])))
+            if int(r['pending_cylinders']) > 0:
+                item.setForeground(Qt.red)
+            self.report_table.setItem(i, 3, item)
         self.report_table.resizeColumnsToContents()
     
     def export_csv(self):

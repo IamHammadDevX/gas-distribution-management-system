@@ -503,7 +503,29 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
             QMessageBox.warning(self, "Database Error", f"Failed to load purchase history: {str(e)}")
         
         layout.addWidget(purchases_table)
-        # Cylinder track summary removed
+        layout.addWidget(QLabel("<b>Pending Cylinders Summary:</b>"))
+        cyl_table = QTableWidget()
+        cyl_table.setColumnCount(6)
+        cyl_table.setHorizontalHeaderLabels(["Product", "Capacity", "Delivered", "Returned", "Pending", "Status"])
+        cyl_table.setAlternatingRowColors(True)
+        cyl_table.setSelectionBehavior(QTableWidget.SelectRows)
+        cyl_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        try:
+            rows = self.db_manager.get_client_cylinder_status(client['id'])
+            cyl_table.setRowCount(len(rows))
+            for i, r in enumerate(rows):
+                prod_name = f"{r['gas_type']}{(' ' + r['sub_type']) if r.get('sub_type') else ''}"
+                cyl_table.setItem(i, 0, QTableWidgetItem(prod_name))
+                cyl_table.setItem(i, 1, QTableWidgetItem(r['capacity']))
+                cyl_table.setItem(i, 2, QTableWidgetItem(str(int(r['delivered']))))
+                cyl_table.setItem(i, 3, QTableWidgetItem(str(int(r['returned']))))
+                cyl_table.setItem(i, 4, QTableWidgetItem(str(int(r['pending']))))
+                status = 'Done' if int(r['pending']) <= 0 else 'Pending'
+                cyl_table.setItem(i, 5, QTableWidgetItem(status))
+            cyl_table.resizeColumnsToContents()
+        except Exception:
+            pass
+        layout.addWidget(cyl_table)
         
         # Close button
         close_btn = QPushButton("Close")
