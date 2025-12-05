@@ -405,6 +405,7 @@ class ClientsWidget(QWidget):
                     if mw:
                         mw.refresh_dashboard()
                         mw.refresh_current_page("cylinder_track")
+                        mw.refresh_current_page("weekly_payments")
                 except Exception:
                     pass
 
@@ -435,6 +436,19 @@ class ClientsWidget(QWidget):
                     
                     QMessageBox.information(self, "Success", "Client updated successfully!")
                     self.load_clients()
+                    try:
+                        from PySide6.QtWidgets import QApplication
+                        mw = None
+                        for w in QApplication.topLevelWidgets():
+                            if hasattr(w, 'refresh_dashboard'):
+                                mw = w
+                                break
+                        if mw:
+                            mw.refresh_dashboard()
+                            mw.refresh_current_page("cylinder_track")
+                            mw.refresh_current_page("weekly_payments")
+                    except Exception:
+                        pass
                 else:
                     QMessageBox.warning(self, "Error", "Failed to update client.")
                     

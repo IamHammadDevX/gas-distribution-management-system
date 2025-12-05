@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy, QScrollArea)
+                               QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy, QScrollArea, QGroupBox, QTableWidget, QTableWidgetItem)
 from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
 from PySide6.QtGui import QFont, QGuiApplication
 from src.database_module import DatabaseManager
@@ -398,6 +398,18 @@ class MainWindow(QMainWindow):
 
         self.update_dashboard_stats(widget, stats)
         layout.addLayout(stats_layout)
+
+        gb = QGroupBox("Top Clients by Pending Cylinders")
+        gbl = QVBoxLayout(gb)
+        self.top_pending_table = QTableWidget()
+        self.top_pending_table.setColumnCount(4)
+        self.top_pending_table.setHorizontalHeaderLabels(["Client", "Phone", "Company", "Pending"])
+        self.top_pending_table.setAlternatingRowColors(True)
+        self.top_pending_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.top_pending_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        gbl.addWidget(self.top_pending_table)
+        layout.addWidget(gb)
+        self.update_top_pending_clients()
         layout.addStretch()
         return widget
     
@@ -554,6 +566,7 @@ class MainWindow(QMainWindow):
             if 'dashboard' in self.widgets:
                 dashboard_widget = self.widgets['dashboard']
                 self.update_dashboard_stats(dashboard_widget, stats)
+                self.update_top_pending_clients()
                 
         except Exception as e:
             print(f"Error refreshing dashboard: {str(e)}")
@@ -603,6 +616,19 @@ class MainWindow(QMainWindow):
                         
         except Exception as e:
             print(f"Error updating dashboard stats: {str(e)}")
+
+    def update_top_pending_clients(self):
+        try:
+            rows = self.db_manager.get_pending_cylinder_summary_by_client()
+            top = [r for r in rows if int(r.get('pending_cylinders') or 0) > 0][:8]
+            self.top_pending_table.setRowCount(len(top))
+            for i, r in enumerate(top):
+                self.top_pending_table.setItem(i, 0, QTableWidgetItem(r['name']))
+                self.top_pending_table.setItem(i, 1, QTableWidgetItem(r['phone']))
+                self.top_pending_table.setItem(i, 2, QTableWidgetItem(r.get('company') or ''))
+                self.top_pending_table.setItem(i, 3, QTableWidgetItem(str(int(r['pending_cylinders']))))
+        except Exception as e:
+            print(f"Error updating top pending clients: {str(e)}")
     
     def set_role_permissions(self):
         """Set permissions based on user role"""

@@ -546,6 +546,18 @@ class SalesWidget(QWidget):
                     f"Created sale for client: {current_client_name}, Receipt: {receipt_number}",
                     self.current_user['id']
                 )
+                try:
+                    from datetime import date, timedelta
+                    d = date.today()
+                    wd = d.weekday()
+                    sat_offset = (wd - 5) % 7
+                    week_start = d if wd == 5 else (d - timedelta(days=sat_offset))
+                    week_end = week_start + timedelta(days=6)
+                    ws = week_start.strftime('%Y-%m-%d')
+                    we = week_end.strftime('%Y-%m-%d')
+                    self.db_manager.upsert_weekly_invoice(current_client_id, ws, we, self.current_user.get('id'))
+                except Exception:
+                    pass
                 QMessageBox.information(
                     self,
                     "Sale Completed",
@@ -569,6 +581,18 @@ class SalesWidget(QWidget):
                     self.client_combo.setCurrentIndex(-1)
                     self.current_client = None
                     self.client_info_label.setText("No client selected")
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    mw = None
+                    for w in QApplication.topLevelWidgets():
+                        if hasattr(w, 'refresh_dashboard'):
+                            mw = w
+                            break
+                    if mw:
+                        mw.refresh_dashboard()
+                        mw.refresh_current_page("weekly_payments")
+                except Exception:
+                    pass
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to complete sale: {str(e)}")
 

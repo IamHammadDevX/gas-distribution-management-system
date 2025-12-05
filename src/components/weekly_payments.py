@@ -375,6 +375,9 @@ class WeeklyPaymentsWidget(QWidget):
         if amount <= 0:
             QMessageBox.warning(self, "Invalid", "Amount must be greater than zero.")
             return
+        if amount > remaining:
+            QMessageBox.warning(self, "Invalid", "Amount cannot exceed the remaining balance.")
+            return
         try:
             day = date_edit.date().toString('yyyy-MM-dd')
             self.db_manager.record_weekly_payment(invoice_row['id'], amount, day, self.current_user.get('id'), method.currentText())
@@ -391,6 +394,7 @@ class WeeklyPaymentsWidget(QWidget):
                     mw.refresh_dashboard()
                     mw.refresh_current_page("clients")
                     mw.refresh_current_page("receipts")
+                    mw.refresh_current_page("cylinder_track")
             except Exception:
                 pass
         except Exception as e:
@@ -412,6 +416,7 @@ class WeeklyPaymentsWidget(QWidget):
                     mw.refresh_dashboard()
                     mw.refresh_current_page("clients")
                     mw.refresh_current_page("receipts")
+                    mw.refresh_current_page("cylinder_track")
             except Exception:
                 pass
         except Exception as e:

@@ -341,6 +341,9 @@ class DatabaseManager:
         return self.execute_update(query, (name, phone, address, company, val, val))
     
     def update_client(self, client_id: int, name: str, phone: str, address: str = "", company: str = "", initial_previous_balance: Optional[float] = None) -> bool:
+        rows = self.execute_query('SELECT id FROM clients WHERE id = ?', (client_id,))
+        if not rows:
+            return False
         query = '''
             UPDATE clients 
             SET name = ?, phone = ?, address = ?, company = ?, 
@@ -348,7 +351,9 @@ class DatabaseManager:
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         '''
-        return self.execute_update(query, (name, phone, address, company, initial_previous_balance, client_id)) > 0
+        self.execute_update(query, (name, phone, address, company, initial_previous_balance, client_id))
+        self.update_client_balance(client_id)
+        return True
     
     def update_client_balance(self, client_id: int):
         query = '''
@@ -608,7 +613,7 @@ class DatabaseManager:
     def upsert_weekly_invoice(self, client_id: int, week_start: str, week_end: str, created_by: Optional[int] = None) -> int:
         summary = self.compute_weekly_summary_for_client(client_id, week_start, week_end)
         rows = self.execute_query('''
-            SELECT id FROM weekly_invoices WHERE client_id = ? AND week_start = ? AND week_end = ?
+            SELECT id, previous_balance, amount_paid FROM weekly_invoices WHERE client_id = ? AND week_start = ? AND week_end = ?
         ''', (client_id, week_start, week_end))
         receipt_number = None
         if summary['final_payable'] > 0:
@@ -617,12 +622,18 @@ class DatabaseManager:
             ''', (client_id, week_start, week_end))
             receipt_number = existing[0]['receipt_number'] if existing else self.get_next_weekly_receipt_number()
         if rows:
+            prev_snapshot = float(rows[0]['previous_balance'])
+            weekly_total = float(summary['total_payable'])
+            final_payable_calc = round(prev_snapshot + weekly_total, 2)
+            amount_paid_calc = float(summary['amount_paid'])
+            eps = 0.01
+            status_calc = 'PAID' if (final_payable_calc <= eps) or (amount_paid_calc + eps >= final_payable_calc) else 'UNPAID'
             self.execute_update('''
                 UPDATE weekly_invoices
-                SET total_cylinders = ?, subtotal = ?, discount = ?, tax_amount = ?, total_payable = ?, previous_balance = ?, final_payable = ?, updated_at = CURRENT_TIMESTAMP, amount_paid = ?, status = ?, receipt_number = COALESCE(receipt_number, ?)
+                SET total_cylinders = ?, subtotal = ?, discount = ?, tax_amount = ?, total_payable = ?, final_payable = ?, updated_at = CURRENT_TIMESTAMP, amount_paid = ?, status = ?, receipt_number = COALESCE(receipt_number, ?)
                 WHERE id = ?
             ''', (
-                summary['total_cylinders'], summary['subtotal'], summary['discount'], summary['tax_amount'], summary['total_payable'], summary['previous_balance'], summary['final_payable'], summary['amount_paid'], summary['status'], receipt_number, rows[0]['id']
+                summary['total_cylinders'], summary['subtotal'], summary['discount'], summary['tax_amount'], summary['total_payable'], final_payable_calc, amount_paid_calc, status_calc, receipt_number, rows[0]['id']
             ))
             return rows[0]['id']
         invoice_number = self.get_next_weekly_invoice_number()
@@ -724,7 +735,7 @@ class DatabaseManager:
                 self.update_client_balance(client_id)
 
     def mark_weekly_invoice_paid(self, weekly_invoice_id: int) -> bool:
-        inv_rows = self.execute_query('SELECT id, final_payable, amount_paid, status FROM weekly_invoices WHERE id = ?', (weekly_invoice_id,))
+        inv_rows = self.execute_query('SELECT id, client_id, final_payable, amount_paid, status FROM weekly_invoices WHERE id = ?', (weekly_invoice_id,))
         if not inv_rows:
             return False
         inv = inv_rows[0]
@@ -733,6 +744,10 @@ class DatabaseManager:
         if abs(remaining) > eps:
             raise ValueError('Remaining balance is not zero')
         updated = self.execute_update('UPDATE weekly_invoices SET status = "PAID", paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (weekly_invoice_id,))
+        client_id = inv['client_id']
+        self.execute_update('UPDATE clients SET initial_previous_balance = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (client_id,))
+        self.execute_update('UPDATE sales SET amount_paid = total_amount, balance = 0 WHERE client_id = ? AND balance != 0', (client_id,))
+        self.update_client_balance(client_id)
         try:
             self.log_activity('WeeklyInvoiceMarkedPaid', f"Weekly invoice {weekly_invoice_id} marked PAID", None)
         except Exception:
@@ -1057,6 +1072,20 @@ class DatabaseManager:
             (client_id,)
         )
         delivered_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in sale_items}
+        sales_single = self.execute_query(
+            '''
+            SELECT gp.gas_type, gp.sub_type, gp.capacity, COALESCE(SUM(s.quantity),0) AS qty
+            FROM sales s
+            LEFT JOIN sale_items si ON si.sale_id = s.id
+            JOIN gas_products gp ON s.gas_product_id = gp.id
+            WHERE s.client_id = ? AND si.id IS NULL
+            GROUP BY gp.gas_type, gp.sub_type, gp.capacity
+            ''',
+            (client_id,)
+        )
+        for x in sales_single:
+            key = (x['gas_type'], x['sub_type'], x['capacity'])
+            delivered_map[key] = delivered_map.get(key, 0) + int(x['qty'])
 
         returns = self.execute_query(
             '''
