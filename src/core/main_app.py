@@ -48,27 +48,27 @@ class RajputGasManagement(QApplication):
         self.db.log_activity("LOGIN", f"User {self.current_user['username']} logged in")
     
     def setup_automatic_backup(self):
-        """Setup automatic daily backup at midnight"""
+        """Setup automatic daily backup (runs once per day)"""
         self.backup_timer = QTimer()
         self.backup_timer.timeout.connect(self.check_backup_time)
         self.backup_timer.start(60000)  # Check every minute
-        
-        # Check immediately on startup
+        # Initial check
         self.check_backup_time()
     
     def check_backup_time(self):
-        """Check if it's time for automatic backup"""
-        from datetime import datetime, time
-        now = datetime.now()
-        
-        # Run backup at midnight (00:00)
-        if now.hour == 0 and now.minute == 0:
-            try:
+        """Check if daily backup should run; runs if last backup is older than today"""
+        try:
+            if self.backup_manager.should_backup():
                 backup_path = self.backup_manager.create_backup()
                 if backup_path:
                     print(f"Automatic backup created: {backup_path}")
-            except Exception as e:
-                print(f"Automatic backup failed: {str(e)}")
+                # Optional cleanup of backups older than 30 days
+                try:
+                    self.backup_manager.cleanup_old_backups(days_to_keep=30)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Automatic backup check failed: {str(e)}")
 
 def main():
     """Main entry point"""
