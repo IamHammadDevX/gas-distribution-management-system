@@ -404,9 +404,10 @@ class ClientsWidget(QWidget):
                             break
                     if mw:
                         mw.refresh_dashboard()
+                        mw.refresh_current_page("cylinder_track")
                 except Exception:
                     pass
-                
+
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to add client: {str(e)}")
     

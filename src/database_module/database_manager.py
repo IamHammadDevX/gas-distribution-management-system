@@ -508,6 +508,37 @@ class DatabaseManager:
         '''
         return self.execute_query(query, params)
 
+    def get_receipt_with_summaries_by_number(self, receipt_number: str) -> Optional[Dict]:
+        query = '''
+            SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
+                   s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount,
+                   (
+                       SELECT GROUP_CONCAT(
+                           COALESCE(gp.gas_type,'') ||
+                           CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
+                           ' ' || COALESCE(gp.capacity,'')
+                           , ', '
+                       )
+                       FROM sale_items si2
+                       JOIN gas_products gp ON si2.gas_product_id = gp.id
+                       WHERE si2.sale_id = r.sale_id
+                       ORDER BY si2.id
+                   ) AS product_summary,
+                   (
+                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       FROM sale_items si2
+                       WHERE si2.sale_id = r.sale_id
+                       ORDER BY si2.id
+                   ) AS quantities_summary
+            FROM receipts r
+            JOIN clients c ON r.client_id = c.id
+            JOIN sales s ON r.sale_id = s.id
+            WHERE r.receipt_number = ?
+            LIMIT 1
+        '''
+        rows = self.execute_query(query, (receipt_number,))
+        return rows[0] if rows else None
+
     def compute_weekly_summary_for_client(self, client_id: int, week_start: str, week_end: str) -> Dict[str, Any]:
         params = (client_id, week_start, week_end)
         rows = self.execute_query('''
@@ -980,17 +1011,33 @@ class DatabaseManager:
             for k in key_variants:
                 returned_map[k] = returned_map.get(k, 0) + int(gr['qty'])
 
-        rows = []
+        def group_cap(g, c):
+            if g == 'LPG' and c in ('12kg', '15kg'):
+                return '12/15kg'
+            return c
+
+        group_data = {}
         for (gas_type, sub_type, cap) in keys:
+            gcap = group_cap(gas_type, cap)
             delivered = delivered_map.get((gas_type, sub_type, cap), 0) + init_map.get((gas_type, cap), 0)
             returned = returned_map.get((gas_type, sub_type, cap), 0)
-            pending = max(0, delivered - returned)
+            key = (gas_type, sub_type, gcap)
+            agg = group_data.get(key)
+            if not agg:
+                group_data[key] = {'delivered': delivered, 'returned': returned}
+            else:
+                agg['delivered'] += delivered
+                agg['returned'] += returned
+
+        rows = []
+        for (gas_type, sub_type, cap_group), vals in group_data.items():
+            pending = max(0, int(vals['delivered']) - int(vals['returned']))
             rows.append({
                 'gas_type': gas_type,
                 'sub_type': sub_type,
-                'capacity': cap,
-                'delivered': delivered,
-                'returned': returned,
+                'capacity': cap_group,
+                'delivered': int(vals['delivered']),
+                'returned': int(vals['returned']),
                 'pending': pending
             })
         return rows

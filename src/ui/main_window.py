@@ -694,6 +694,8 @@ class MainWindow(QMainWindow):
                 if hasattr(self.widgets['settings'], 'load_settings'):
                     self.widgets['settings'].load_settings()
             elif page_name == "cylinder_track":
+                if hasattr(self.widgets['cylinder_track'], 'load_clients'):
+                    self.widgets['cylinder_track'].load_clients()
                 if hasattr(self.widgets['cylinder_track'], 'refresh_data'):
                     self.widgets['cylinder_track'].refresh_data()
         except Exception as e:

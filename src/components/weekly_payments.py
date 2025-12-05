@@ -287,6 +287,19 @@ class WeeklyPaymentsWidget(QWidget):
             self.db_manager.record_weekly_payment(invoice_row['id'], float(amount), day, self.current_user.get('id'))
             QMessageBox.information(self, "Success", "Payment recorded.")
             self.load_weekly_invoices()
+            try:
+                from PySide6.QtWidgets import QApplication
+                mw = None
+                for w in QApplication.topLevelWidgets():
+                    if hasattr(w, 'refresh_dashboard'):
+                        mw = w
+                        break
+                if mw:
+                    mw.refresh_dashboard()
+                    mw.refresh_current_page("clients")
+                    mw.refresh_current_page("receipts")
+            except Exception:
+                pass
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
@@ -295,6 +308,19 @@ class WeeklyPaymentsWidget(QWidget):
             self.db_manager.mark_weekly_invoice_paid(invoice_row['id'])
             QMessageBox.information(self, "Success", "Weekly invoice marked as PAID.")
             self.load_weekly_invoices()
+            try:
+                from PySide6.QtWidgets import QApplication
+                mw = None
+                for w in QApplication.topLevelWidgets():
+                    if hasattr(w, 'refresh_dashboard'):
+                        mw = w
+                        break
+                if mw:
+                    mw.refresh_dashboard()
+                    mw.refresh_current_page("clients")
+                    mw.refresh_current_page("receipts")
+            except Exception:
+                pass
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 

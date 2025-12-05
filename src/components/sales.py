@@ -468,10 +468,6 @@ class SalesWidget(QWidget):
         total_amount_after_discount = max(0.0, total_amount - overall_discount)
         amount_paid = self.amount_paid_spinbox.value()
         balance = total_amount_after_discount - amount_paid
-        if amount_paid <= 0:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid payment amount.")
-            self.amount_paid_spinbox.setFocus()
-            return
         if amount_paid < total_amount_after_discount:
             reply = QMessageBox.question(
                 self,

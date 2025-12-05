@@ -40,11 +40,14 @@ class ReturnDialog(QDialog):
             QMessageBox.warning(self, "Invalid Quantity", "Return quantity must be greater than zero.")
             return
         try:
+            cap = self.product_row['capacity']
+            if self.product_row['gas_type'] == 'LPG' and cap == '12/15kg':
+                cap = '12kg'
             self.db_manager.add_cylinder_return(
                 self.client['id'],
                 self.product_row['gas_type'],
                 self.product_row.get('sub_type') or None,
-                self.product_row['capacity'],
+                cap,
                 qty
             )
             try:
