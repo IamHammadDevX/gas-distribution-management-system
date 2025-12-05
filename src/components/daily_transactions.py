@@ -147,14 +147,7 @@ class DailyTransactionsWidget(QWidget):
                     row.append(item.text() if item else "")
                 html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
             html.append("</table>")
-            cats = self.db_manager.get_empty_stock_by_category(d)
-            html.extend(["<h3 style='font-size:12pt;'>Empty Stock Summary</h3>",
-                         "<table border='1' cellspacing='0' cellpadding='6' style='width:60%; font-size:10pt; border-collapse:collapse;'>",
-                         "<tr><th>Category</th><th>Quantity</th></tr>"])
-            for c in cats:
-                label = f"{c['gas_type']} - {c['capacity']}"
-                html.append(f"<tr><td>{label}</td><td style='text-align:right;'>{c['quantity']}</td></tr>")
-            html.append("</table>")
+            # Empty stock summary removed
             doc = QTextDocument()
             doc.setDefaultFont(QFont("Arial", 10))
             doc.setHtml("".join(html))

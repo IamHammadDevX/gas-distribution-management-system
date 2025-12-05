@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QMessageBox, QDialog, QFormLayout, QDialogButtonBox,
                                QComboBox, QSpinBox, QGroupBox, QTextEdit, QHeaderView,
                                QDateTimeEdit, QCheckBox, QSizePolicy)
-from PySide6.QtCore import Qt, QDateTime, QTimer
+from PySide6.QtCore import Qt, QDateTime
 from src.database_module import DatabaseManager
 from datetime import datetime
 
@@ -397,10 +397,6 @@ class GatePassesWidget(QWidget):
         self.current_user = current_user
         self.init_ui()
         self.load_gate_passes()
-        self.auto_timer = QTimer(self)
-        self.auto_timer.setInterval(60000)
-        self.auto_timer.timeout.connect(self.run_auto_returns)
-        self.auto_timer.start()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -731,13 +727,7 @@ class GatePassesWidget(QWidget):
         dialog = GatePassDialog(self.db_manager, self.current_user, self, gate_pass_data)
         dialog.exec()
 
-    def run_auto_returns(self):
-        try:
-            changed = self.db_manager.auto_mark_due_returns()
-            if changed:
-                self.load_gate_passes()
-        except Exception:
-            pass
+    # Auto returns removed
     
     def mark_returned(self, gate_pass_data: dict):
         """Mark gate pass as returned"""

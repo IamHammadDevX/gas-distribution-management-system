@@ -153,19 +153,6 @@ class DatabaseManager:
             except Exception:
                 pass
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS cylinder_returns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    gate_pass_id INTEGER,
-                    client_id INTEGER NOT NULL,
-                    gas_type TEXT NOT NULL,
-                    capacity TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    returned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (gate_pass_id) REFERENCES gate_passes (id),
-                    FOREIGN KEY (client_id) REFERENCES clients (id)
-                )
-            ''')
-            cursor.execute('''
                 CREATE TABLE IF NOT EXISTS client_initial_outstanding (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     client_id INTEGER NOT NULL,
@@ -789,185 +776,16 @@ class DatabaseManager:
                                           vehicle_number, gas_type, capacity, quantity, gate_operator_id, expected_time_in))
 
     def add_cylinder_return(self, client_id: int, gas_type: str, capacity: str, quantity: int, gate_pass_id: Optional[int] = None) -> int:
-        if quantity is None or int(quantity) < 0:
-            raise ValueError("Return quantity cannot be negative")
-        qty = int(quantity)
-        delivered_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        returned_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        initial_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        delivered = int(delivered_rows[0]['total']) if delivered_rows else 0
-        returned = int(returned_rows[0]['total']) if returned_rows else 0
-        initial_delivered = int(initial_rows[0]['total']) if initial_rows else 0
-        remaining = (delivered + initial_delivered) - returned
-        if qty > remaining:
-            raise ValueError(f"Return quantity {qty} exceeds pending {remaining}")
-        query = '''
-            INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity)
-            VALUES (?, ?, ?, ?, ?)
-        '''
-        return self.execute_update(query, (gate_pass_id, client_id, gas_type, capacity, qty))
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def get_return_rows_for_client_product(self, client_id: int, gas_type: str, capacity: str) -> List[Dict]:
-        return self.execute_query('''
-            SELECT id, quantity, returned_at
-            FROM cylinder_returns
-            WHERE client_id = ? AND gas_type = ? AND capacity = ?
-            ORDER BY returned_at DESC, id DESC
-        ''', (client_id, gas_type, capacity))
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def update_total_return_for_client_product(self, client_id: int, gas_type: str, capacity: str, new_total: int) -> bool:
-        if new_total is None or int(new_total) < 0:
-            raise ValueError('Total returned cannot be negative')
-        target = int(new_total)
-        d_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM gate_passes WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        i_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM client_initial_outstanding WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        r_rows = self.execute_query(
-            'SELECT COALESCE(SUM(quantity),0) as total FROM cylinder_returns WHERE client_id = ? AND gas_type = ? AND capacity = ?',
-            (client_id, gas_type, capacity)
-        )
-        delivered = int(d_rows[0]['total']) if d_rows else 0
-        initial_delivered = int(i_rows[0]['total']) if i_rows else 0
-        current = int(r_rows[0]['total']) if r_rows else 0
-        max_allowed = delivered + initial_delivered
-        if target > max_allowed:
-            raise ValueError('Total returned cannot exceed total delivered')
-        if target == current:
-            return True
-        if target > current:
-            add_qty = target - current
-            self.execute_update('''
-                INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (None, client_id, gas_type, capacity, int(add_qty)))
-            return True
-        diff = current - target
-        rows = self.get_return_rows_for_client_product(client_id, gas_type, capacity)
-        for r in rows:
-            if diff <= 0:
-                break
-            q = int(r['quantity'])
-            if q <= diff:
-                self.execute_update('DELETE FROM cylinder_returns WHERE id = ?', (r['id'],))
-                diff -= q
-            else:
-                new_q = q - diff
-                self.execute_update('UPDATE cylinder_returns SET quantity = ? WHERE id = ?', (new_q, r['id']))
-                diff = 0
-        return True
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def get_cylinder_summary_for_client(self, client_id: int):
-        gp_rows = self.execute_query('SELECT id, receipt_id, gas_type, capacity, quantity FROM gate_passes WHERE client_id = ?', (client_id,))
-        agg_deliveries: Dict[tuple, Dict] = {}
-        for gp in gp_rows:
-            gt_raw = (gp.get('gas_type') or '').strip()
-            cap_raw = (gp.get('capacity') or '').strip()
-            if gt_raw == 'Multiple' or cap_raw == 'Multiple':
-                rid = gp.get('receipt_id')
-                sale_id = None
-                if rid:
-                    rows = self.execute_query('SELECT sale_id FROM receipts WHERE id = ?', (rid,))
-                    sale_id = rows[0]['sale_id'] if rows else None
-                items = self.get_sale_items(sale_id) if sale_id else []
-                for it in items:
-                    igt = (it.get('gas_type') or '').strip()
-                    icap_raw = (it.get('capacity') or '').strip()
-                    icap_norm = icap_raw.replace(' ', '').lower()
-                    if igt.upper() == 'LPG' and icap_norm in ('12kg', '15kg'):
-                        key = ('LPG', '12/15kg', it.get('sub_type') or '')
-                    elif igt.upper() == 'LPG' and icap_norm in ('45kg',):
-                        key = ('LPG', '45kg', it.get('sub_type') or '')
-                    else:
-                        key = (igt, icap_raw, it.get('sub_type') or '')
-                    prev = agg_deliveries.get(key)
-                    if prev:
-                        prev['delivered'] = int(prev['delivered']) + int(it.get('quantity') or 0)
-                    else:
-                        agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(it.get('quantity') or 0)}
-            else:
-                cap_norm = cap_raw.replace(' ', '').lower()
-                rows = self.execute_query('SELECT s.gas_product_id FROM receipts r JOIN sales s ON r.sale_id = s.id WHERE r.id = ?', (gp.get('receipt_id'),))
-                sub_type = ''
-                if rows:
-                    prod_rows = self.execute_query('SELECT sub_type FROM gas_products WHERE id = ?', (rows[0]['gas_product_id'],))
-                    sub_type = (prod_rows[0]['sub_type'] or '') if prod_rows else ''
-                if gt_raw.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                    key = ('LPG', '12/15kg', sub_type)
-                elif gt_raw.upper() == 'LPG' and cap_norm in ('45kg',):
-                    key = ('LPG', '45kg', sub_type)
-                else:
-                    key = (gt_raw, cap_raw, sub_type)
-                prev = agg_deliveries.get(key)
-                if prev:
-                    prev['delivered'] = int(prev['delivered']) + int(gp.get('quantity') or 0)
-                else:
-                    agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(gp.get('quantity') or 0)}
-        initials = self.execute_query('''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as delivered
-            FROM client_initial_outstanding
-            WHERE client_id = ?
-            GROUP BY gas_type, capacity
-        ''', (client_id,))
-        for d in initials:
-            gt = (d['gas_type'] or '').strip()
-            cap_raw = (d['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg', '')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg', '')
-            else:
-                key = (gt, cap_raw, '')
-            prev = agg_deliveries.get(key)
-            if prev:
-                prev['delivered'] = int(prev['delivered']) + int(d['delivered'])
-            else:
-                agg_deliveries[key] = {'gas_type': key[0], 'capacity': key[1], 'sub_type': key[2], 'delivered': int(d['delivered'])}
-        returns = self.execute_query('''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns
-            WHERE client_id = ?
-            GROUP BY gas_type, capacity
-        ''', (client_id,))
-        agg_returns: Dict[tuple, int] = {}
-        for r in returns:
-            gt = (r['gas_type'] or '').strip()
-            cap_raw = (r['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg')
-            else:
-                key = (gt, cap_raw)
-            agg_returns[key] = agg_returns.get(key, 0) + int(r['returned'])
-        summary: List[Dict] = []
-        for key, d in agg_deliveries.items():
-            rkey = (d['gas_type'], d['capacity'])
-            ret = agg_returns.get(rkey, 0)
-            summary.append({
-                'gas_type': d['gas_type'],
-                'sub_type': d.get('sub_type') or '',
-                'capacity': d['capacity'],
-                'delivered': int(d['delivered']),
-                'returned': int(ret),
-                'remaining': int(d['delivered']) - int(ret)
-            })
-        return summary
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def add_vehicle_expense(self, driver_id: Optional[int], driver_name: str, vehicle_number: str, expense_type: str, amount: float, notes: str, expense_date):
         query = '''
@@ -983,226 +801,22 @@ class DatabaseManager:
         return self.execute_query(query, (day,))
 
     def get_client_deliveries_with_returns(self, client_id: int) -> List[Dict]:
-        deliveries = self.execute_query('''
-            SELECT gp.id as gate_pass_id, gp.gate_pass_number, gp.gas_type, gp.capacity,
-                   gp.quantity as delivered, gp.time_out, gp.time_in,
-                   COALESCE(prod.sub_type,'') as sub_type
-            FROM gate_passes gp
-            LEFT JOIN receipts r ON gp.receipt_id = r.id
-            LEFT JOIN sales s ON r.sale_id = s.id
-            LEFT JOIN gas_products prod ON s.gas_product_id = prod.id
-            WHERE gp.client_id = ?
-            ORDER BY gp.created_at DESC
-        ''', (client_id,))
-        returns = self.execute_query('''
-            SELECT gate_pass_id, gas_type, capacity, COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns
-            WHERE client_id = ?
-            GROUP BY gate_pass_id, gas_type, capacity
-        ''', (client_id,))
-        rmap = {}
-        for r in returns:
-            key = (r.get('gate_pass_id'), r['gas_type'], r['capacity'])
-            rmap[key] = r['returned']
-        out = []
-        for d in deliveries:
-            key = (d['gate_pass_id'] if 'gate_pass_id' in d else d['gate_pass_id'], d['gas_type'], d['capacity'])
-            ret = rmap.get(key, 0)
-            out.append({
-                'gate_pass_id': d['gate_pass_id'],
-                'gate_pass_number': d['gate_pass_number'],
-                'gas_type': d['gas_type'],
-                'sub_type': d.get('sub_type') or '',
-                'capacity': d['capacity'],
-                'delivered': d['delivered'],
-                'returned': int(ret),
-                'remaining': int(d['delivered']) - int(ret),
-                'time_out': d['time_out'],
-                'time_in': d['time_in']
-            })
-        return out
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def auto_mark_due_returns(self) -> int:
-        count = 0
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, client_id, gas_type, capacity, quantity
-                FROM gate_passes
-                WHERE expected_time_in IS NOT NULL AND time_in IS NULL AND expected_time_in <= CURRENT_TIMESTAMP
-            ''')
-            due = [dict(r) for r in cursor.fetchall()]
-            for gp in due:
-                cursor.execute('SELECT COALESCE(SUM(quantity),0) as returned FROM cylinder_returns WHERE gate_pass_id = ?', (gp['id'],))
-                returned = cursor.fetchone()['returned']
-                remaining = int(gp['quantity']) - int(returned)
-                if remaining > 0:
-                    cursor.execute('''
-                        INSERT INTO cylinder_returns (gate_pass_id, client_id, gas_type, capacity, quantity, returned_at)
-                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ''', (gp['id'], gp['client_id'], gp['gas_type'], gp['capacity'], remaining))
-                cursor.execute('UPDATE gate_passes SET time_in = CURRENT_TIMESTAMP WHERE id = ?', (gp['id'],))
-                count += 1
-            conn.commit()
-        return count
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def find_latest_gate_pass_for_product(self, client_id: int, gas_type: str, capacity: str) -> Optional[int]:
-        rows = self.execute_query('''
-            SELECT id FROM gate_passes 
-            WHERE client_id = ? AND gas_type = ? AND capacity = ?
-            ORDER BY created_at DESC LIMIT 1
-        ''', (client_id, gas_type, capacity))
-        return rows[0]['id'] if rows else None
+        raise NotImplementedError("Cylinder returns feature removed")
     
     def get_type_summary_for_client(self, client_id: int) -> List[Dict]:
-        delivered_rows = self.execute_query('''
-            SELECT gp.gas_type as gas_type, COALESCE(SUM(si.quantity),0) as delivered
-            FROM sale_items si
-            JOIN sales s ON si.sale_id = s.id
-            JOIN receipts r ON r.sale_id = s.id
-            JOIN gas_products gp ON si.gas_product_id = gp.id
-            WHERE r.client_id = ?
-            GROUP BY gp.gas_type
-        ''', (client_id,))
-        if not delivered_rows:
-            delivered_rows = self.execute_query('''
-                SELECT gp.gas_type as gas_type, COALESCE(SUM(s.quantity),0) as delivered
-                FROM sales s
-                JOIN gas_products gp ON s.gas_product_id = gp.id
-                WHERE s.client_id = ?
-                GROUP BY gp.gas_type
-            ''', (client_id,))
-        initial_rows = self.execute_query('''
-            SELECT gas_type, COALESCE(SUM(quantity),0) as delivered
-            FROM client_initial_outstanding
-            WHERE client_id = ?
-            GROUP BY gas_type
-        ''', (client_id,))
-        returns = self.execute_query('''
-            SELECT gas_type, COALESCE(SUM(quantity),0) as returned
-            FROM cylinder_returns
-            WHERE client_id = ?
-            GROUP BY gas_type
-        ''', (client_id,))
-        dmap: Dict[str, int] = {}
-        for d in delivered_rows:
-            dmap[d['gas_type']] = dmap.get(d['gas_type'], 0) + int(d['delivered'])
-        for i in initial_rows:
-            dmap[i['gas_type']] = dmap.get(i['gas_type'], 0) + int(i['delivered'])
-        rmap = {r['gas_type']: int(r['returned']) for r in returns}
-        keys = set(list(dmap.keys()) + list(rmap.keys()))
-        out: List[Dict] = []
-        for gt in sorted(keys):
-            delv = int(dmap.get(gt, 0))
-            ret = int(rmap.get(gt, 0))
-            out.append({
-                'gas_type': gt,
-                'delivered': delv,
-                'returned': ret,
-                'remaining': delv - ret
-            })
-        return out
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def get_pending_capacity_map_for_client(self, client_id: int) -> Dict[str, List[str]]:
-        gp_rows = self.execute_query('SELECT id, receipt_id, gas_type, capacity, quantity FROM gate_passes WHERE client_id = ?', (client_id,))
-        dmap: Dict[tuple, int] = {}
-        for gp in gp_rows:
-            gt_raw = (gp.get('gas_type') or '').strip()
-            cap_raw = (gp.get('capacity') or '').strip()
-            if gt_raw == 'Multiple' or cap_raw == 'Multiple':
-                rid = gp.get('receipt_id')
-                sale_id = None
-                if rid:
-                    rows = self.execute_query('SELECT sale_id FROM receipts WHERE id = ?', (rid,))
-                    sale_id = rows[0]['sale_id'] if rows else None
-                items = self.get_sale_items(sale_id) if sale_id else []
-                for it in items:
-                    igt = (it.get('gas_type') or '').strip()
-                    icap_raw = (it.get('capacity') or '').strip()
-                    icap_norm = icap_raw.replace(' ', '').lower()
-                    if igt.upper() == 'LPG' and icap_norm in ('12kg', '15kg'):
-                        key = ('LPG', '12/15kg')
-                    elif igt.upper() == 'LPG' and icap_norm in ('45kg',):
-                        key = ('LPG', '45kg')
-                    else:
-                        key = (igt, icap_raw)
-                    dmap[key] = dmap.get(key, 0) + int(it.get('quantity') or 0)
-            else:
-                cap_norm = cap_raw.replace(' ', '').lower()
-                if gt_raw.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                    key = ('LPG', '12/15kg')
-                elif gt_raw.upper() == 'LPG' and cap_norm in ('45kg',):
-                    key = ('LPG', '45kg')
-                else:
-                    key = (gt_raw, cap_raw)
-                dmap[key] = dmap.get(key, 0) + int(gp.get('quantity') or 0)
-        init_rows = self.execute_query('SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as delivered FROM client_initial_outstanding WHERE client_id = ? GROUP BY gas_type, capacity', (client_id,))
-        for i in init_rows:
-            gt = (i['gas_type'] or '').strip()
-            cap_raw = (i['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg')
-            else:
-                key = (gt, cap_raw)
-            dmap[key] = dmap.get(key, 0) + int(i['delivered'])
-        rrows = self.execute_query('SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as returned FROM cylinder_returns WHERE client_id = ? GROUP BY gas_type, capacity', (client_id,))
-        rmap: Dict[tuple, int] = {}
-        for r in rrows:
-            gt = (r['gas_type'] or '').strip()
-            cap_raw = (r['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg')
-            else:
-                key = (gt, cap_raw)
-            rmap[key] = int(r['returned'])
-        out: Dict[str, List[str]] = {}
-        for key, delivered in dmap.items():
-            returned = rmap.get(key, 0)
-            if delivered > returned:
-                out.setdefault(key[0], []).append(key[1])
-        for gt in list(out.keys()):
-            out[gt] = sorted(sorted(set(out[gt])))
-        return out
+        raise NotImplementedError("Cylinder returns feature removed")
 
     def get_empty_stock_by_category(self, day: Optional[str] = None) -> List[Dict]:
-        where = ''
-        params: tuple = ()
-        if day:
-            where = "WHERE DATE(returned_at, 'localtime') = ?"
-            params = (day,)
-        rows = self.execute_query(f'''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) as qty
-            FROM cylinder_returns
-            {where}
-            GROUP BY gas_type, capacity
-        ''', params)
-        agg: Dict[tuple, int] = {}
-        for r in rows:
-            gt = (r['gas_type'] or '').strip()
-            cap_raw = (r['capacity'] or '').strip()
-            cap_norm = cap_raw.replace(' ', '').lower()
-            key: tuple
-            if gt.upper() == 'LPG' and cap_norm in ('12kg', '15kg'):
-                key = ('LPG', '12/15kg')
-            elif gt.upper() == 'LPG' and cap_norm in ('45kg',):
-                key = ('LPG', '45kg')
-            else:
-                key = (gt, cap_raw)
-            agg[key] = agg.get(key, 0) + int(r['qty'])
-        out = [{
-            'gas_type': k[0],
-            'capacity': k[1],
-            'quantity': v
-        } for k, v in agg.items()]
-        out.sort(key=lambda x: (x['gas_type'], x['capacity']))
-        return out
+        raise NotImplementedError("Cylinder returns feature removed")
     
     def add_client_initial_outstanding(self, client_id: int, gas_type: str, capacity: str, quantity: int) -> int:
         query = '''
@@ -1270,3 +884,55 @@ class DatabaseManager:
             ORDER BY gp.created_at DESC
         '''
         return self.execute_query(query, (start_date, end_date))
+    # Add to class DatabaseManager:
+
+    def get_all_company_products(self):
+        """Return all gas products with type, sub_type, capacity."""
+        return self.execute_query("""
+            SELECT gas_type, sub_type, capacity
+            FROM gas_products
+            WHERE is_active = 1
+            ORDER BY gas_type, sub_type, capacity
+        """)
+
+    def get_client_cylinder_status(self, client_id: int):
+        """
+        List all company products with delivered, returned, and pending counts for this client.
+        Returns: list of dict with gas_type, sub_type, capacity, delivered, returned, pending.
+        """
+        # Build all company products as keys
+        prods = self.get_all_company_products()
+        keys = [(p['gas_type'], p['sub_type'], p['capacity']) for p in prods]
+
+        # Delivered per product/capacity
+        deliveries = self.execute_query("""
+            SELECT gas_type, capacity, 
+            (SELECT sub_type FROM gas_products WHERE gas_products.gas_type=gp.gas_type AND gas_products.capacity=gp.capacity LIMIT 1) as sub_type,
+            COALESCE(SUM(quantity),0) as delivered
+            FROM gate_passes gp WHERE client_id=? 
+            GROUP BY gas_type, capacity
+        """, (client_id,))
+        delivered_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['delivered']) for x in deliveries}
+
+        # Returned per product/capacity
+        returns = self.execute_query("""
+            SELECT gas_type, capacity,
+            (SELECT sub_type FROM gas_products WHERE gas_products.gas_type=cr.gas_type AND gas_products.capacity=cr.capacity LIMIT 1) as sub_type,
+            COALESCE(SUM(quantity),0) as returned
+            FROM cylinder_returns cr WHERE client_id=?
+            GROUP BY gas_type, capacity
+        """, (client_id,))
+        returned_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['returned']) for x in returns}
+
+        # Build output
+        rows = []
+        for (gas_type, sub_type, cap) in keys:
+            delivered = delivered_map.get((gas_type, sub_type, cap), 0)
+            returned = returned_map.get((gas_type, sub_type, cap), 0)
+            pending = max(0, delivered - returned)
+            rows.append(dict(gas_type=gas_type, sub_type=sub_type, capacity=cap,
+                            delivered=delivered, returned=returned, pending=pending))
+        return rows
+
+    def add_cylinder_return(self, client_id: int, gas_type: str, sub_type: str, capacity: str, quantity: int):
+        raise NotImplementedError("Cylinder returns feature removed")

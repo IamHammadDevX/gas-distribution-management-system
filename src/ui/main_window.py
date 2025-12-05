@@ -181,7 +181,6 @@ class MainWindow(QMainWindow):
             ("Receipts", "receipts"),
             ("Gate Passes", "gate_passes"),
             ("Daily Transactions", "daily_transactions"),
-            ("Cylinder Track", "cylinder_track"),
             ("Weekly Payments", "weekly_payments"),
             ("Vehicle Expenses", "vehicle_expenses"),
             ("Employees", "employees"),
@@ -316,11 +315,7 @@ class MainWindow(QMainWindow):
         self.widgets["daily_transactions"] = daily_widget
         self.content_area.addWidget(daily_widget)
 
-        # Cylinder Track widget
-        from src.components.cylinder_track import CylinderTrackWidget
-        cyl_widget = CylinderTrackWidget(self.db_manager, self.current_user)
-        self.widgets["cylinder_track"] = cyl_widget
-        self.content_area.addWidget(cyl_widget)
+        # Cylinder Track widget removed
 
         # Vehicle Expenses widget
         from src.components.vehicle_expenses import VehicleExpensesWidget
@@ -534,7 +529,7 @@ class MainWindow(QMainWindow):
         query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM client_initial_outstanding'
         result = self.db_manager.execute_query(query)
         total_initial_outstanding = int(result[0]['total']) if result else 0
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM cylinder_returns'
+        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes WHERE time_in IS NOT NULL'
         result = self.db_manager.execute_query(query)
         total_returned = int(result[0]['total']) if result else 0
         pending_cylinders = int(total_delivered) + int(total_initial_outstanding) - int(total_returned)
@@ -621,11 +616,11 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'weekly_payments', 'vehicle_expenses', 'gate_passes', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'gate_passes', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'cylinder_track', 'weekly_payments', 'vehicle_expenses', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'reports']
         elif role == 'Gate Operator':
-            enabled_modules = ['dashboard', 'daily_transactions', 'cylinder_track', 'gate_passes']
+            enabled_modules = ['dashboard', 'daily_transactions', 'gate_passes']
         elif role == 'Driver':
             enabled_modules = ['dashboard']
         
@@ -654,7 +649,6 @@ class MainWindow(QMainWindow):
                 "sales": "Sales & Billing",
                 "receipts": "Receipts",
                 "daily_transactions": "Daily Transactions",
-                "cylinder_track": "Cylinder Track",
                 "weekly_payments": "Weekly Payments",
                 "vehicle_expenses": "Vehicle Expenses",
                 "gate_passes": "Gate Passes",
