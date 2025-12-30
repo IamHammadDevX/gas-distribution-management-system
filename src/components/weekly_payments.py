@@ -221,14 +221,15 @@ class WeeklyPaymentsWidget(QWidget):
         group = QGroupBox("Weekly Billing Details")
         g_layout = QVBoxLayout(group)
         self.table = QTableWidget()
-        self.table.setColumnCount(13)
+        self.table.setColumnCount(14)
         self.table.setHorizontalHeaderLabels([
-            "Client", "Cylinders", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Remaining", "Status", "Actions", "Week"
+            "Client", "Cylinders", "Empty Return", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Remaining", "Status", "Actions", "Week"
         ])
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setColumnWidth(11, 360)
+        self.table.setColumnWidth(1, 180)  # Wider for breakdown
+        self.table.setColumnWidth(12, 360)
         g_layout.addWidget(self.table)
         layout.addWidget(group)
 
@@ -284,22 +285,28 @@ class WeeklyPaymentsWidget(QWidget):
             if r.get('client_company'):
                 client_text += f" ({r['client_company']})"
             self.table.setItem(i, 0, QTableWidgetItem(client_text))
-            self.table.setItem(i, 1, QTableWidgetItem(str(int(r['total_cylinders']))))
-            self.table.setItem(i, 2, QTableWidgetItem(f"Rs. {float(r['subtotal']):,.2f}"))
-            self.table.setItem(i, 3, QTableWidgetItem(f"Rs. {float(r['discount']):,.2f}"))
-            self.table.setItem(i, 4, QTableWidgetItem(f"Rs. {float(r['tax_amount']):,.2f}"))
-            self.table.setItem(i, 5, QTableWidgetItem(f"Rs. {float(r['total_payable']):,.2f}"))
-            self.table.setItem(i, 6, QTableWidgetItem(f"Rs. {float(r['previous_balance']):,.2f}"))
-            self.table.setItem(i, 7, QTableWidgetItem(f"Rs. {float(r['final_payable']):,.2f}"))
-            self.table.setItem(i, 8, QTableWidgetItem(f"Rs. {float(r['amount_paid']):,.2f}"))
+            
+            # Cylinder breakdown and Empty Return
+            cyl_breakdown = self.db_manager.get_weekly_sales_breakdown(r['client_id'], ws, we)
+            empty_returns = self.db_manager.get_weekly_returns_count(r['client_id'], ws, we)
+            self.table.setItem(i, 1, QTableWidgetItem(cyl_breakdown))
+            self.table.setItem(i, 2, QTableWidgetItem(str(empty_returns)))
+            
+            self.table.setItem(i, 3, QTableWidgetItem(f"Rs. {float(r['subtotal']):,.2f}"))
+            self.table.setItem(i, 4, QTableWidgetItem(f"Rs. {float(r['discount']):,.2f}"))
+            self.table.setItem(i, 5, QTableWidgetItem(f"Rs. {float(r['tax_amount']):,.2f}"))
+            self.table.setItem(i, 6, QTableWidgetItem(f"Rs. {float(r['total_payable']):,.2f}"))
+            self.table.setItem(i, 7, QTableWidgetItem(f"Rs. {float(r['previous_balance']):,.2f}"))
+            self.table.setItem(i, 8, QTableWidgetItem(f"Rs. {float(r['final_payable']):,.2f}"))
+            self.table.setItem(i, 9, QTableWidgetItem(f"Rs. {float(r['amount_paid']):,.2f}"))
             remaining_val = max(0.0, float(r['final_payable']) - float(r['amount_paid']))
-            self.table.setItem(i, 9, QTableWidgetItem(f"Rs. {remaining_val:,.2f}"))
+            self.table.setItem(i, 10, QTableWidgetItem(f"Rs. {remaining_val:,.2f}"))
             status_item = QTableWidgetItem(r['status'])
             if r['status'] == 'PAID':
                 status_item.setForeground(Qt.darkGreen)
             else:
                 status_item.setForeground(Qt.red)
-            self.table.setItem(i, 10, status_item)
+            self.table.setItem(i, 11, status_item)
             actions = QWidget()
             h = QHBoxLayout(actions)
             h.setContentsMargins(5, 5, 5, 5)
@@ -343,8 +350,8 @@ class WeeklyPaymentsWidget(QWidget):
             btn_mark.clicked.connect(lambda checked=False, row=r: self.mark_paid(row))
             h.addWidget(btn_mark)
             actions.setLayout(h)
-            self.table.setCellWidget(i, 11, actions)
-            self.table.setItem(i, 12, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
+            self.table.setCellWidget(i, 12, actions)
+            self.table.setItem(i, 13, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
 
     def print_client(self, invoice_row: dict):
         dlg = WeeklyClientReceiptDialog(self.db_manager, invoice_row, self)
@@ -470,22 +477,23 @@ class WeeklyPaymentsWidget(QWidget):
                 "</div>",
                 f"<h2 style='text-align:center; font-size:16pt; margin-top:0;'>Weekly Billing List - {ws} to {we}</h2>",
                 "<table border='1' cellspacing='0' cellpadding='4' style='width:100%; font-size:9pt; border-collapse:collapse;'>",
-                "<tr><th style='width:15%;'>Client</th><th>Cylinders</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Rem</th><th>Status</th></tr>"
+                "<tr><th style='width:12%;'>Client</th><th style='width:25%;'>Cylinders</th><th>Empty Return</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Rem</th><th>Status</th></tr>"
             ]
             for i in range(self.table.rowCount()):
                 raw_client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""
                 client = raw_client.split(' (')[0]  # Only show name, remove company in brackets
                 cyl = self.table.item(i, 1).text() if self.table.item(i, 1) else ""
-                sub = self.table.item(i, 2).text() if self.table.item(i, 2) else ""
-                disc = self.table.item(i, 3).text() if self.table.item(i, 3) else ""
-                tax = self.table.item(i, 4).text() if self.table.item(i, 4) else ""
-                tot = self.table.item(i, 5).text() if self.table.item(i, 5) else ""
-                prev = self.table.item(i, 6).text() if self.table.item(i, 6) else ""
-                final = self.table.item(i, 7).text() if self.table.item(i, 7) else ""
-                paid = self.table.item(i, 8).text() if self.table.item(i, 8) else ""
-                remaining = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
-                status = self.table.item(i, 10).text() if self.table.item(i, 10) else ""
-                html.append(f"<tr><td>{client}</td><td>{cyl}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td>{status}</td></tr>")
+                empty = self.table.item(i, 2).text() if self.table.item(i, 2) else ""
+                sub = self.table.item(i, 3).text() if self.table.item(i, 3) else ""
+                disc = self.table.item(i, 4).text() if self.table.item(i, 4) else ""
+                tax = self.table.item(i, 5).text() if self.table.item(i, 5) else ""
+                tot = self.table.item(i, 6).text() if self.table.item(i, 6) else ""
+                prev = self.table.item(i, 7).text() if self.table.item(i, 7) else ""
+                final = self.table.item(i, 8).text() if self.table.item(i, 8) else ""
+                paid = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
+                remaining = self.table.item(i, 10).text() if self.table.item(i, 10) else ""
+                status = self.table.item(i, 11).text() if self.table.item(i, 11) else ""
+                html.append(f"<tr><td>{client}</td><td>{cyl}</td><td>{empty}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td>{status}</td></tr>")
             html.append("</table>")
             doc = QTextDocument()
             doc.setDefaultFont(QFont("Arial", 9))
