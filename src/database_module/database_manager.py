@@ -1202,28 +1202,66 @@ class DatabaseManager:
         result.sort(key=lambda x: x['pending_cylinders'], reverse=True)
         return result
 
-    def get_weekly_returns_count(self, client_id: int, week_start: str, week_end: str) -> int:
+    def get_weekly_returns_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:
         query = '''
-            SELECT SUM(qty) AS total FROM (
-                SELECT quantity as qty FROM cylinder_returns
-                WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
-                UNION ALL
-                SELECT quantity as qty FROM gate_passes
-                WHERE client_id = ? AND time_in IS NOT NULL AND DATE(time_in, 'localtime') BETWEEN ? AND ?
+            SELECT GROUP_CONCAT(summary, ', ') as result FROM (
+                SELECT 
+                    CASE 
+                        WHEN gas_type = 'LPG' THEN 'L'
+                        WHEN gas_type = 'Oxygen' THEN 'O2'
+                        WHEN gas_type = 'Nitrogen' THEN 'N2'
+                        WHEN gas_type = 'Argon' THEN 'Ar'
+                        WHEN gas_type = 'Acetylene' THEN 'C2H2'
+                        WHEN gas_type = 'Helium' THEN 'He'
+                        WHEN gas_type = 'CO2' THEN 'CO2'
+                        ELSE SUBSTR(gas_type, 1, 3)
+                    END || 
+                    CASE 
+                        WHEN sub_type IS NOT NULL AND sub_type != '' THEN ' ' || SUBSTR(sub_type, 1, 3) 
+                        ELSE '' 
+                    END || 
+                    CASE 
+                        WHEN gas_type = 'LPG' AND capacity = '12kg' THEN ' 12'
+                        WHEN gas_type = 'LPG' AND capacity = '15kg' THEN ' 15'
+                        WHEN gas_type = 'LPG' AND capacity IN ('12kg', '15kg') THEN ' 12/15'
+                        ELSE ' ' || REPLACE(COALESCE(capacity,''), 'm3', '')
+                    END || ' ' || SUM(qty) as summary
+                FROM (
+                    SELECT gas_type, sub_type, capacity, quantity as qty FROM cylinder_returns
+                    WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
+                    UNION ALL
+                    SELECT gas_type, NULL as sub_type, capacity, quantity as qty FROM gate_passes
+                    WHERE client_id = ? AND time_in IS NOT NULL AND DATE(time_in, 'localtime') BETWEEN ? AND ?
+                ) t
+                GROUP BY gas_type, sub_type, CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END
             )
         '''
         rows = self.execute_query(query, (client_id, week_start, week_end, client_id, week_start, week_end))
-        return int(rows[0]['total']) if rows and rows[0]['total'] else 0
+        return rows[0]['result'] if rows and rows[0]['result'] else "0"
 
     def get_weekly_sales_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:
         query = '''
             SELECT GROUP_CONCAT(summary, ', ') as result FROM (
                 SELECT 
-                    COALESCE(gp.gas_type,'') || 
-                    CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END || 
                     CASE 
-                        WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg', '15kg') THEN ' 12/15kg'
-                        ELSE ' ' || COALESCE(gp.capacity,'')
+                        WHEN gp.gas_type = 'LPG' THEN 'L'
+                        WHEN gp.gas_type = 'Oxygen' THEN 'O2'
+                        WHEN gp.gas_type = 'Nitrogen' THEN 'N2'
+                        WHEN gp.gas_type = 'Argon' THEN 'Ar'
+                        WHEN gp.gas_type = 'Acetylene' THEN 'C2H2'
+                        WHEN gp.gas_type = 'Helium' THEN 'He'
+                        WHEN gp.gas_type = 'CO2' THEN 'CO2'
+                        ELSE SUBSTR(gp.gas_type, 1, 3)
+                    END || 
+                    CASE 
+                        WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || SUBSTR(gp.sub_type, 1, 3) 
+                        ELSE '' 
+                    END || 
+                    CASE 
+                        WHEN gp.gas_type = 'LPG' AND gp.capacity = '12kg' THEN ' 12'
+                        WHEN gp.gas_type = 'LPG' AND gp.capacity = '15kg' THEN ' 15'
+                        WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg', '15kg') THEN ' 12/15'
+                        ELSE ' ' || REPLACE(COALESCE(gp.capacity,''), 'm3', '')
                     END || ' ' || SUM(qty) as summary
                 FROM (
                     SELECT si.gas_product_id, si.quantity as qty FROM sale_items si

@@ -74,7 +74,40 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
         pays = self.db_manager.get_weekly_payment_history(self.invoice['id'])
         items_rows = []
         for it in items:
-            items_rows.append(f"<tr><td>{it['date']}</td><td>{it['gas_type']} {it['sub_type']} {it['capacity']}</td><td>{int(it['quantity'])}</td><td>{float(it['unit_price']):,.2f}</td><td>{float(it['subtotal']):,.2f}</td><td>{float(it['tax_amount']):,.2f}</td><td>{float(it['total_amount']):,.2f}</td></tr>")
+            gas = it['gas_type']
+            sub = it['sub_type'] or ''
+            cap = it['capacity']
+            
+            # Map gas to symbol
+            if gas == 'LPG':
+                g_sym = 'L'
+            elif gas == 'Oxygen':
+                g_sym = 'O2'
+            elif gas == 'Nitrogen':
+                g_sym = 'N2'
+            elif gas == 'Argon':
+                g_sym = 'Ar'
+            elif gas == 'Acetylene':
+                g_sym = 'C2H2'
+            elif gas == 'Helium':
+                g_sym = 'He'
+            elif gas == 'CO2':
+                g_sym = 'CO2'
+            else:
+                g_sym = gas[:3]
+                
+            # Map sub-type
+            s_sym = sub[:3] if sub else ''
+            
+            # Map capacity
+            if gas == 'LPG' and cap in ('12kg', '15kg'):
+                c_sym = cap.replace('kg', '')
+            else:
+                c_sym = cap.replace('m3', '')
+                
+            product_display = f"{g_sym} {s_sym} {c_sym}".strip().replace('  ', ' ')
+            
+            items_rows.append(f"<tr><td>{it['date']}</td><td>{product_display}</td><td>{int(it['quantity'])}</td><td>{float(it['unit_price']):,.2f}</td><td>{float(it['subtotal']):,.2f}</td><td>{float(it['tax_amount']):,.2f}</td><td>{float(it['total_amount']):,.2f}</td></tr>")
         pays_rows = []
         for p in pays:
             pays_rows.append(f"<tr><td>{p['payment_date']}</td><td>{float(p['amount']):,.2f}</td><td>{p['payment_method']}</td><td>{p['created_at']}</td></tr>")
@@ -228,7 +261,8 @@ class WeeklyPaymentsWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setColumnWidth(1, 180)  # Wider for breakdown
+        self.table.setColumnWidth(1, 140)  # Optimized width
+        self.table.setColumnWidth(2, 140)  # Optimized width
         self.table.setColumnWidth(12, 360)
         g_layout.addWidget(self.table)
         layout.addWidget(group)
@@ -288,19 +322,19 @@ class WeeklyPaymentsWidget(QWidget):
             
             # Cylinder breakdown and Empty Return
             cyl_breakdown = self.db_manager.get_weekly_sales_breakdown(r['client_id'], ws, we)
-            empty_returns = self.db_manager.get_weekly_returns_count(r['client_id'], ws, we)
+            empty_returns = self.db_manager.get_weekly_returns_breakdown(r['client_id'], ws, we)
             self.table.setItem(i, 1, QTableWidgetItem(cyl_breakdown))
-            self.table.setItem(i, 2, QTableWidgetItem(str(empty_returns)))
+            self.table.setItem(i, 2, QTableWidgetItem(empty_returns))
             
-            self.table.setItem(i, 3, QTableWidgetItem(f"Rs. {float(r['subtotal']):,.2f}"))
-            self.table.setItem(i, 4, QTableWidgetItem(f"Rs. {float(r['discount']):,.2f}"))
-            self.table.setItem(i, 5, QTableWidgetItem(f"Rs. {float(r['tax_amount']):,.2f}"))
-            self.table.setItem(i, 6, QTableWidgetItem(f"Rs. {float(r['total_payable']):,.2f}"))
-            self.table.setItem(i, 7, QTableWidgetItem(f"Rs. {float(r['previous_balance']):,.2f}"))
-            self.table.setItem(i, 8, QTableWidgetItem(f"Rs. {float(r['final_payable']):,.2f}"))
-            self.table.setItem(i, 9, QTableWidgetItem(f"Rs. {float(r['amount_paid']):,.2f}"))
+            self.table.setItem(i, 3, QTableWidgetItem(f" {float(r['subtotal']):,.2f}"))
+            self.table.setItem(i, 4, QTableWidgetItem(f" {float(r['discount']):,.2f}"))
+            self.table.setItem(i, 5, QTableWidgetItem(f" {float(r['tax_amount']):,.2f}"))
+            self.table.setItem(i, 6, QTableWidgetItem(f" {float(r['total_payable']):,.2f}"))
+            self.table.setItem(i, 7, QTableWidgetItem(f" {float(r['previous_balance']):,.2f}"))
+            self.table.setItem(i, 8, QTableWidgetItem(f" {float(r['final_payable']):,.2f}"))
+            self.table.setItem(i, 9, QTableWidgetItem(f" {float(r['amount_paid']):,.2f}"))
             remaining_val = max(0.0, float(r['final_payable']) - float(r['amount_paid']))
-            self.table.setItem(i, 10, QTableWidgetItem(f"Rs. {remaining_val:,.2f}"))
+            self.table.setItem(i, 10, QTableWidgetItem(f" {remaining_val:,.2f}"))
             status_item = QTableWidgetItem(r['status'])
             if r['status'] == 'PAID':
                 status_item.setForeground(Qt.darkGreen)
@@ -477,7 +511,7 @@ class WeeklyPaymentsWidget(QWidget):
                 "</div>",
                 f"<h2 style='text-align:center; font-size:16pt; margin-top:0;'>Weekly Billing List - {ws} to {we}</h2>",
                 "<table border='1' cellspacing='0' cellpadding='4' style='width:100%; font-size:9pt; border-collapse:collapse;'>",
-                "<tr><th style='width:12%;'>Client</th><th style='width:25%;'>Cylinders</th><th>Empty Return</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Rem</th><th>Status</th></tr>"
+                "<tr><th style='width:12%;'>Client</th><th style='width:15%;'>Cylinders</th><th style='width:15%;'>Empty Return</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Rem</th><th>Status</th></tr>"
             ]
             for i in range(self.table.rowCount()):
                 raw_client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""

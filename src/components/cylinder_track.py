@@ -133,23 +133,37 @@ class CylinderTrackWidget(QWidget):
                     r['status'] = 'Done' if int(r['pending']) <= 0 else 'Pending'
                 self._populate(rows)
             else:
-                prods = self.db_manager.get_all_company_products()
-                rows = []
-                for p in prods:
-                    rows.append({
-                        'gas_type': p['gas_type'],
-                        'sub_type': p.get('sub_type'),
-                        'capacity': p['capacity'],
-                        'delivered': 0,
-                        'returned': 0,
-                        'pending': 0,
-                        'status': 'Done'
-                    })
-                self._populate(rows)
+                # Show aggregate or just empty list for "All Clients"?
+                # The user wants to see cylinder track. If "All Clients" is selected, 
+                # showing just zeros is misleading. 
+                # Let's show all clients summary instead.
+                all_status = self.db_manager.get_pending_cylinder_summary_by_client()
+                self._populate_all_clients(all_status)
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to refresh data: {str(e)}")
 
+    def _populate_all_clients(self, rows):
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Client", "Pending Cylinders", "Phone", "Company"])
+        self.table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            self.table.setItem(i, 0, QTableWidgetItem(r['name']))
+            self.table.setItem(i, 1, QTableWidgetItem(str(r['pending_cylinders'])))
+            self.table.setItem(i, 2, QTableWidgetItem(r['phone']))
+            self.table.setItem(i, 3, QTableWidgetItem(r.get('company') or ''))
+        # Hide extra columns if switching from detailed view
+        self.table.setColumnHidden(4, True)
+        self.table.setColumnHidden(5, True)
+        self.table.setColumnHidden(6, True)
+
     def _populate(self, rows):
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Product", "Capacity", "Delivered", "Returned", "Pending", "Status", "Actions"
+        ])
+        self.table.setColumnHidden(4, False)
+        self.table.setColumnHidden(5, False)
+        self.table.setColumnHidden(6, False)
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             prod_name = f"{r['gas_type']}{(' ' + r['sub_type']) if r.get('sub_type') else ''}"
