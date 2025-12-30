@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QGroupBox, QMessageBox, QDialog, QTextEdit, QLineEdit, QFormLayout, QDoubleSpinBox
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QSizeF
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout
 from src.database_module import DatabaseManager
@@ -132,12 +132,20 @@ body { font-family: Arial, sans-serif; color:#000; margin:0; }
         printer = QPrinter(QPrinter.HighResolution)
         printer.setPageSize(QPageSize(QPageSize.A4))
         printer.setPageOrientation(QPageLayout.Portrait)
+        printer.setFullPage(False)
         dialog = QPrintDialog(printer, self)
         if dialog.exec():
+            if not printer.isValid():
+                QMessageBox.critical(self, "Printer Error", "The selected printer is not valid.")
+                return
             doc = QTextDocument()
             doc.setDefaultFont(QFont("Arial", 11))
             doc.setHtml(self.generate_html())
-            doc.setPageSize(printer.pageRect(QPrinter.Point).size())
+            rect = printer.pageRect(QPrinter.Point)
+            if rect.isValid() and rect.width() > 0:
+                doc.setPageSize(rect.size())
+            else:
+                doc.setPageSize(QSizeF(595, 842))
             doc.print_(printer)
 
     def export_pdf(self):
@@ -422,20 +430,51 @@ class WeeklyPaymentsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+    def resolve_logo_path(self) -> str:
+        import os, sys
+        base_mei = getattr(sys, '_MEIPASS', None)
+        exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(sys.argv[0])
+        if base_mei:
+            p = os.path.join(base_mei, 'logo.png')
+            if os.path.exists(p):
+                return p.replace('\\', '/')
+        p = os.path.join(exe_dir, 'logo.png')
+        if os.path.exists(p):
+            return p.replace('\\', '/')
+        fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logo.png'))
+        if os.path.exists(fallback):
+            return fallback.replace('\\', '/')
+        return 'logo.png'
+
     def print_weekly_list(self):
         printer = QPrinter(QPrinter.HighResolution)
         printer.setPageSize(QPageSize(QPageSize.A4))
-        printer.setPageOrientation(QPageLayout.Portrait)
+        printer.setPageOrientation(QPageLayout.Landscape)
+        printer.setFullPage(False)
         dialog = QPrintDialog(printer, self)
         if dialog.exec():
+            if not printer.isValid():
+                QMessageBox.critical(self, "Printer Error", "The selected printer is not valid.")
+                return
             ws, we = self.get_week_range()
             html = [
-                f"<h2 style='text-align:center; font-size:16pt;'>Weekly Billing List - {ws} to {we}</h2>",
-                "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
-                "<tr><th>Client</th><th>Cylinders</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Remaining</th><th>Status</th></tr>"
+                "<div style='text-align:center; border-bottom:2px solid #333; padding-bottom:8px; margin-bottom:10px;'>",
+                "  <div style='display:flex; align-items:center; justify-content:center; gap:12px;'>",
+                f"    <img src='{self.resolve_logo_path()}' alt='Logo' width='48' height='48' style='border:1.5px solid #444; border-radius:50%;' />",
+                "    <div>",
+                "      <div style='font-size:22px; font-weight:900;'>RAJPUT GAS TRADERS</div>",
+                "      <div style='font-size:12px; margin-top:4px;'>Prop: Saleem Ahmad | 0301-6465144</div>",
+                "    </div>",
+                "  </div>",
+                "  <div style='font-size:12px; margin-top:4px;'>Plot No.69C-70C, Small Industrial Estate No.2, Gujranwala</div>",
+                "</div>",
+                f"<h2 style='text-align:center; font-size:16pt; margin-top:0;'>Weekly Billing List - {ws} to {we}</h2>",
+                "<table border='1' cellspacing='0' cellpadding='4' style='width:100%; font-size:9pt; border-collapse:collapse;'>",
+                "<tr><th style='width:15%;'>Client</th><th>Cylinders</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Rem</th><th>Status</th></tr>"
             ]
             for i in range(self.table.rowCount()):
-                client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""
+                raw_client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""
+                client = raw_client.split(' (')[0]  # Only show name, remove company in brackets
                 cyl = self.table.item(i, 1).text() if self.table.item(i, 1) else ""
                 sub = self.table.item(i, 2).text() if self.table.item(i, 2) else ""
                 disc = self.table.item(i, 3).text() if self.table.item(i, 3) else ""
@@ -449,7 +488,12 @@ class WeeklyPaymentsWidget(QWidget):
                 html.append(f"<tr><td>{client}</td><td>{cyl}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td>{status}</td></tr>")
             html.append("</table>")
             doc = QTextDocument()
-            doc.setDefaultFont(QFont("Arial", 10))
+            doc.setDefaultFont(QFont("Arial", 9))
             doc.setHtml("".join(html))
-            doc.setPageSize(printer.pageRect(QPrinter.Point).size())
+            rect = printer.pageRect(QPrinter.Point)
+            if rect.isValid() and rect.width() > 0:
+                doc.setPageSize(rect.size())
+            else:
+                doc.setPageSize(QSizeF(842, 595))  # A4 Landscape
             doc.print_(printer)
+

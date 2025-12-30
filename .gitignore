@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 *.iss
+*.zip
 build/
 develop-eggs/
 dist/
