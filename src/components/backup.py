@@ -16,17 +16,33 @@ class BackupManager:
             os.makedirs(self.backup_dir)
     
     def should_backup(self) -> bool:
-        """Check if daily backup is needed"""
-        query = 'SELECT MAX(created_at) FROM backup_logs'
+        """Check if daily backup is needed.
+
+        SQLite's CURRENT_TIMESTAMP is UTC. If we compare that raw timestamp to the
+        local date in Python right after midnight, we can mistakenly think we
+        haven't backed up "today" yet and run multiple backups.
+
+        To avoid UTC vs local mismatches, compare dates inside SQLite using
+        the 'localtime' modifier.
+        """
+        query = """
+            SELECT
+                MAX(DATE(created_at, 'localtime')) AS last_backup_day,
+                DATE('now', 'localtime') AS today_day
+            FROM backup_logs
+        """
         result = self.db_manager.execute_query(query)
-        
-        if not result or not result[0]['MAX(created_at)']:
+        if not result:
             return True
-        
-        last_backup = datetime.fromisoformat(result[0]['MAX(created_at)'])
-        today = datetime.now().date()
-        
-        return last_backup.date() < today
+
+        last_backup_day = result[0].get("last_backup_day")
+        today_day = result[0].get("today_day")
+
+        if not last_backup_day or not today_day:
+            return True
+
+        # YYYY-MM-DD strings compare correctly lexicographically.
+        return last_backup_day < today_day
     
     def create_backup(self) -> str:
         """Create database backup"""
@@ -65,22 +81,22 @@ class BackupManager:
     
     def get_backup_history(self, days: int = 30) -> list:
         """Get backup history for specified number of days"""
+        cutoff_day = (date.today() - timedelta(days=days)).isoformat()
         query = '''
             SELECT * FROM backup_logs 
-            WHERE DATE(created_at) >= DATE('now', '-' || ? || ' days')
+            WHERE DATE(created_at, 'localtime') >= ?
             ORDER BY created_at DESC
         '''
-        return self.db_manager.execute_query(query, (days,))
+        return self.db_manager.execute_query(query, (cutoff_day,))
     
     def cleanup_old_backups(self, days_to_keep: int = 30):
         """Remove backups older than specified days"""
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
-        
+        cutoff_day = (date.today() - timedelta(days=days_to_keep)).isoformat()
         query = '''
             SELECT backup_path FROM backup_logs 
-            WHERE DATE(created_at) < DATE('now', '-' || ? || ' days')
+            WHERE DATE(created_at, 'localtime') < ?
         '''
-        old_backups = self.db_manager.execute_query(query, (days_to_keep,))
+        old_backups = self.db_manager.execute_query(query, (cutoff_day,))
         
         for backup in old_backups:
             backup_path = backup['backup_path']
