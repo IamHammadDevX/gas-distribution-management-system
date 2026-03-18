@@ -1,299 +1,386 @@
-import sqlite3
 import os
-from datetime import datetime, date, timedelta
+import re
+from contextlib import contextmanager
+from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Any
-import shutil
 import json
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except Exception:  # pragma: no cover
+    psycopg = None
+    dict_row = None
+
+try:
+    from psycopg_pool import ConnectionPool
+except Exception:  # pragma: no cover
+    ConnectionPool = None
+
 class DatabaseManager:
-    def __init__(self, db_path: str = None):
-        if not db_path:
-            db_path = self._default_db_path()
-        self.db_path = db_path
+    def __init__(self, dsn: str | None = None):
+        if psycopg is None:
+            raise RuntimeError(
+                "PostgreSQL support requires psycopg. Install dependencies from requirements.txt."
+            )
+
+        self.dsn = dsn or self._default_dsn()
+        self.app_timezone = os.environ.get("APP_TIMEZONE", "Asia/Karachi")
+
+        self.pool = None
+        if ConnectionPool is not None:
+            self.pool = ConnectionPool(
+                conninfo=self.dsn,
+                min_size=1,
+                max_size=int(os.environ.get("PG_POOL_MAX", "10")),
+                timeout=float(os.environ.get("PG_POOL_TIMEOUT", "10")),
+                configure=self._configure_connection,
+            )
+
         self.init_database()
 
     @staticmethod
-    def _default_db_path() -> str:
-        import sys
-        project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
-        try:
-            test_path = os.path.join(project_root, ".writetest.tmp")
-            with open(test_path, "w") as f:
-                f.write("1")
-            os.remove(test_path)
-            return os.path.join(project_root, "rajput_gas.db")
-        except Exception:
-            base = os.environ.get("LOCALAPPDATA")
-            if not base:
-                base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
-            dir_path = os.path.join(base, "Rajput Gas Ltd")
-            os.makedirs(dir_path, exist_ok=True)
-            return os.path.join(dir_path, "rajput_gas.db")
+    def _default_dsn() -> str:
+        # Preferred: standard DATABASE_URL, e.g. postgresql://user:pass@host:5432/dbname
+        url = os.environ.get("DATABASE_URL")
+        if url:
+            return url
+
+        host = os.environ.get("PGHOST", "127.0.0.1")
+        port = os.environ.get("PGPORT", "5432")
+        dbname = os.environ.get("PGDATABASE", "rajput_gas")
+        user = os.environ.get("PGUSER", "rajput_gas_app")
+        password = os.environ.get("PGPASSWORD", "")
+        sslmode = os.environ.get("PGSSLMODE", "prefer")
+
+        # psycopg "conninfo" format
+        parts = [
+            f"host={host}",
+            f"port={port}",
+            f"dbname={dbname}",
+            f"user={user}",
+            f"sslmode={sslmode}",
+            "connect_timeout=10",
+            "target_session_attrs=read-write",
+            "application_name=rajput_gas_management",
+        ]
+        if password:
+            parts.append(f"password={password}")
+        return " ".join(parts)
+
+    def _configure_connection(self, conn):
+        # Keep date handling consistent across the app by pinning a session timezone.
+        # This influences DATE(timestamp) and other time operations.
+        with conn.cursor() as cur:
+            cur.execute("SELECT set_config('TimeZone', %s, false)", (self.app_timezone,))
+            # Make committed transactions durable on server crash (WAL).
+            cur.execute("SET synchronous_commit TO on")
+        conn.commit()
+
+    @contextmanager
+    def _connection(self):
+        if self.pool is not None:
+            with self.pool.connection() as conn:
+                yield conn
+            return
+
+        with psycopg.connect(self.dsn, row_factory=dict_row) as conn:
+            self._configure_connection(conn)
+            yield conn
+
+    @staticmethod
+    def _translate_sql(query: str) -> str:
+        # Param placeholders: sqlite3 uses '?', psycopg uses '%s'
+        query = query.replace("?", "%s")
+
+        # SQLite allows double-quotes for strings in some modes; PostgreSQL treats them as identifiers.
+        query = query.replace('"PAID"', "'PAID'").replace('"UNPAID"', "'UNPAID'").replace('"Admin"', "'Admin'")
+
+        # SQLite date modifier 'localtime' has no direct Postgres equivalent; we use session TZ instead.
+        query = re.sub(r"DATE\(\s*([^,\)]+?)\s*,\s*'localtime'\s*\)", r"DATE(\1)", query, flags=re.IGNORECASE)
+
+        # SQLite often uses 1/0 for booleans; normalize known app predicates for PostgreSQL.
+        query = re.sub(r"\bis_active\s*=\s*1\b", "is_active = TRUE", query, flags=re.IGNORECASE)
+        query = re.sub(r"\bis_active\s*=\s*0\b", "is_active = FALSE", query, flags=re.IGNORECASE)
+
+        return query
+
+    def close(self):
+        if self.pool is not None:
+            try:
+                self.pool.close()
+            except Exception:
+                pass
     
     def init_database(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('Admin', 'Accountant', 'Gate Operator', 'Driver')),
-                    full_name TEXT NOT NULL,
-                    phone TEXT,
-                    email TEXT,
-                    is_active BOOLEAN DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS clients (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    address TEXT,
-                    company TEXT,
-                    total_purchases DECIMAL(10,2) DEFAULT 0,
-                    total_paid DECIMAL(10,2) DEFAULT 0,
-                    balance DECIMAL(10,2) DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            try:
-                cursor.execute('ALTER TABLE clients ADD COLUMN initial_previous_balance DECIMAL(10,2) DEFAULT 0')
-            except Exception:
-                pass
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS gas_products (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    gas_type TEXT NOT NULL,
-                    sub_type TEXT,
-                    capacity TEXT NOT NULL,
-                    unit_price DECIMAL(10,2) DEFAULT 0,
-                    description TEXT,
-                    is_active BOOLEAN DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sales (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER NOT NULL,
-                    gas_product_id INTEGER NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    unit_price DECIMAL(10,2) NOT NULL,
-                    subtotal DECIMAL(10,2) NOT NULL,
-                    tax_amount DECIMAL(10,2) NOT NULL,
-                    total_amount DECIMAL(10,2) NOT NULL,
-                    amount_paid DECIMAL(10,2) DEFAULT 0,
-                    balance DECIMAL(10,2) DEFAULT 0,
-                    created_by INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (gas_product_id) REFERENCES gas_products (id),
-                    FOREIGN KEY (created_by) REFERENCES users (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sale_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sale_id INTEGER NOT NULL,
-                    gas_product_id INTEGER NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    unit_price DECIMAL(10,2) NOT NULL,
-                    subtotal DECIMAL(10,2) NOT NULL,
-                    tax_amount DECIMAL(10,2) NOT NULL,
-                    total_amount DECIMAL(10,2) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (sale_id) REFERENCES sales (id),
-                    FOREIGN KEY (gas_product_id) REFERENCES gas_products (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS receipts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    receipt_number TEXT UNIQUE NOT NULL,
-                    sale_id INTEGER NOT NULL,
-                    client_id INTEGER NOT NULL,
-                    total_amount DECIMAL(10,2) NOT NULL,
-                    amount_paid DECIMAL(10,2) DEFAULT 0,
-                    balance DECIMAL(10,2) DEFAULT 0,
-                    created_by INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (sale_id) REFERENCES sales (id),
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (created_by) REFERENCES users (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS gate_passes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    gate_pass_number TEXT UNIQUE NOT NULL,
-                    receipt_id INTEGER NOT NULL,
-                    client_id INTEGER NOT NULL,
-                    driver_name TEXT NOT NULL,
-                    vehicle_number TEXT NOT NULL,
-                    gas_type TEXT NOT NULL,
-                    capacity TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    time_out TIMESTAMP,
-                    expected_time_in TIMESTAMP,
-                    time_in TIMESTAMP,
-                    gate_operator_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (receipt_id) REFERENCES receipts (id),
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (gate_operator_id) REFERENCES users (id)
-                )
-            ''')
-            try:
-                cursor.execute('ALTER TABLE gate_passes ADD COLUMN expected_time_in TIMESTAMP')
-            except Exception:
-                pass
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS client_initial_outstanding (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER NOT NULL,
-                    gas_type TEXT NOT NULL,
-                    capacity TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (client_id) REFERENCES clients (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS weekly_invoices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    invoice_number TEXT UNIQUE NOT NULL,
-                    client_id INTEGER NOT NULL,
-                    week_start DATE NOT NULL,
-                    week_end DATE NOT NULL,
-                    total_cylinders INTEGER DEFAULT 0,
-                    subtotal DECIMAL(10,2) DEFAULT 0,
-                    discount DECIMAL(10,2) DEFAULT 0,
-                    tax_amount DECIMAL(10,2) DEFAULT 0,
-                    total_payable DECIMAL(10,2) DEFAULT 0,
-                    previous_balance DECIMAL(10,2) DEFAULT 0,
-                    final_payable DECIMAL(10,2) DEFAULT 0,
-                    amount_paid DECIMAL(10,2) DEFAULT 0,
-                    status TEXT NOT NULL DEFAULT 'UNPAID' CHECK(status IN ('PAID','UNPAID')),
-                    receipt_number TEXT,
-                    created_by INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    paid_at TIMESTAMP,
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (created_by) REFERENCES users (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS weekly_payments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    weekly_invoice_id INTEGER NOT NULL,
-                    client_id INTEGER NOT NULL,
-                    amount DECIMAL(10,2) NOT NULL,
-                    payment_date DATE NOT NULL,
-                    payment_method TEXT,
-                    created_by INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (weekly_invoice_id) REFERENCES weekly_invoices (id),
-                    FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (created_by) REFERENCES users (id)
-                )
-            ''')
-            try:
-                cursor.execute('ALTER TABLE weekly_payments ADD COLUMN payment_method TEXT')
-            except Exception:
-                pass
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS employees (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    salary DECIMAL(10,2) NOT NULL,
-                    contact TEXT,
-                    joining_date DATE NOT NULL,
-                    is_active BOOLEAN DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vehicle_expenses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    driver_id INTEGER,
-                    driver_name TEXT,
-                    vehicle_number TEXT,
-                    expense_type TEXT NOT NULL,
-                    amount DECIMAL(10,2) NOT NULL,
-                    notes TEXT,
-                    expense_date DATE NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (driver_id) REFERENCES employees (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS activity_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    activity_type TEXT NOT NULL,
-                    description TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS backup_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    backup_path TEXT NOT NULL,
-                    backup_size INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS cylinder_returns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER NOT NULL,
-                    gas_type TEXT NOT NULL,
-                    sub_type TEXT,
-                    capacity TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (client_id) REFERENCES clients (id)
-                )
-            ''')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_weekly_invoices_client_week ON weekly_invoices (client_id, week_start, week_end)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_weekly_payments_invoice ON weekly_payments (weekly_invoice_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)')
-            cursor.execute('SELECT COUNT(*) FROM users WHERE role = "Admin"')
-            if cursor.fetchone()[0] == 0:
-                import hashlib
-                password_hash = hashlib.sha256("admin123".encode()).hexdigest()
-                cursor.execute('''
-                    INSERT INTO users (username, password_hash, role, full_name, phone, email)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', ("admin", password_hash, "Admin", "System Administrator", "", ""))
-            conn.commit()
+        ddl_statements = [
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('Admin', 'Accountant', 'Gate Operator', 'Driver')),
+                full_name TEXT NOT NULL,
+                phone TEXT,
+                email TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMPTZ
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS clients (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                address TEXT,
+                company TEXT,
+                total_purchases DECIMAL(10,2) DEFAULT 0,
+                total_paid DECIMAL(10,2) DEFAULT 0,
+                balance DECIMAL(10,2) DEFAULT 0,
+                initial_previous_balance DECIMAL(10,2) DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS gas_products (
+                id BIGSERIAL PRIMARY KEY,
+                gas_type TEXT NOT NULL,
+                sub_type TEXT,
+                capacity TEXT NOT NULL,
+                unit_price DECIMAL(10,2) DEFAULT 0,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sales (
+                id BIGSERIAL PRIMARY KEY,
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                gas_product_id BIGINT NOT NULL REFERENCES gas_products(id),
+                quantity INTEGER NOT NULL,
+                unit_price DECIMAL(10,2) NOT NULL,
+                subtotal DECIMAL(10,2) NOT NULL,
+                tax_amount DECIMAL(10,2) NOT NULL,
+                total_amount DECIMAL(10,2) NOT NULL,
+                amount_paid DECIMAL(10,2) DEFAULT 0,
+                balance DECIMAL(10,2) DEFAULT 0,
+                created_by BIGINT NOT NULL REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sale_items (
+                id BIGSERIAL PRIMARY KEY,
+                sale_id BIGINT NOT NULL REFERENCES sales(id),
+                gas_product_id BIGINT NOT NULL REFERENCES gas_products(id),
+                quantity INTEGER NOT NULL,
+                unit_price DECIMAL(10,2) NOT NULL,
+                subtotal DECIMAL(10,2) NOT NULL,
+                tax_amount DECIMAL(10,2) NOT NULL,
+                total_amount DECIMAL(10,2) NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS receipts (
+                id BIGSERIAL PRIMARY KEY,
+                receipt_number TEXT UNIQUE NOT NULL,
+                sale_id BIGINT NOT NULL REFERENCES sales(id),
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                total_amount DECIMAL(10,2) NOT NULL,
+                amount_paid DECIMAL(10,2) DEFAULT 0,
+                balance DECIMAL(10,2) DEFAULT 0,
+                created_by BIGINT NOT NULL REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS gate_passes (
+                id BIGSERIAL PRIMARY KEY,
+                gate_pass_number TEXT UNIQUE NOT NULL,
+                receipt_id BIGINT NOT NULL REFERENCES receipts(id),
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                driver_name TEXT NOT NULL,
+                vehicle_number TEXT NOT NULL,
+                gas_type TEXT NOT NULL,
+                capacity TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                time_out TIMESTAMPTZ,
+                expected_time_in TIMESTAMPTZ,
+                time_in TIMESTAMPTZ,
+                gate_operator_id BIGINT NOT NULL REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS client_initial_outstanding (
+                id BIGSERIAL PRIMARY KEY,
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                gas_type TEXT NOT NULL,
+                capacity TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS weekly_invoices (
+                id BIGSERIAL PRIMARY KEY,
+                invoice_number TEXT UNIQUE NOT NULL,
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                total_cylinders INTEGER DEFAULT 0,
+                subtotal DECIMAL(10,2) DEFAULT 0,
+                discount DECIMAL(10,2) DEFAULT 0,
+                tax_amount DECIMAL(10,2) DEFAULT 0,
+                total_payable DECIMAL(10,2) DEFAULT 0,
+                previous_balance DECIMAL(10,2) DEFAULT 0,
+                final_payable DECIMAL(10,2) DEFAULT 0,
+                amount_paid DECIMAL(10,2) DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'UNPAID' CHECK(status IN ('PAID','UNPAID')),
+                receipt_number TEXT,
+                created_by BIGINT REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMPTZ
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS weekly_payments (
+                id BIGSERIAL PRIMARY KEY,
+                weekly_invoice_id BIGINT NOT NULL REFERENCES weekly_invoices(id),
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                amount DECIMAL(10,2) NOT NULL,
+                payment_date DATE NOT NULL,
+                payment_method TEXT,
+                created_by BIGINT REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                salary DECIMAL(10,2) NOT NULL,
+                contact TEXT,
+                joining_date DATE NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS vehicle_expenses (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id BIGINT REFERENCES employees(id),
+                driver_name TEXT,
+                vehicle_number TEXT,
+                expense_type TEXT NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                notes TEXT,
+                expense_date DATE NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES users(id),
+                activity_type TEXT NOT NULL,
+                description TEXT,
+                timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS backup_logs (
+                id BIGSERIAL PRIMARY KEY,
+                backup_path TEXT NOT NULL,
+                backup_size BIGINT,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS cylinder_returns (
+                id BIGSERIAL PRIMARY KEY,
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                gas_type TEXT NOT NULL,
+                sub_type TEXT,
+                capacity TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)",
+            "CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_client_week ON weekly_invoices (client_id, week_start, week_end)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_payments_invoice ON weekly_payments (weekly_invoice_id)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)",
+        ]
+
+        with self._connection() as conn:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    for ddl in ddl_statements:
+                        cur.execute(ddl)
+
+        rows = self.execute_query("SELECT COUNT(*) AS n FROM users WHERE role = 'Admin'")
+        if not rows or int(rows[0]["n"]) == 0:
+            import hashlib
+
+            password_hash = hashlib.sha256("admin123".encode()).hexdigest()
+            self.execute_update(
+                """
+                INSERT INTO users (username, password_hash, role, full_name, phone, email)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                ("admin", password_hash, "Admin", "System Administrator", "", ""),
+            )
     
     def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+        sql = self._translate_sql(query)
+        with self._connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(sql, params)
+                rows = list(cur.fetchall())
+                normalized: List[Dict] = []
+                for row in rows:
+                    item = dict(row)
+                    for key, value in list(item.items()):
+                        if isinstance(value, datetime):
+                            item[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+                        elif isinstance(value, date):
+                            item[key] = value.isoformat()
+                        elif isinstance(value, time):
+                            item[key] = value.strftime("%H:%M:%S")
+                    normalized.append(item)
+                return normalized
     
     def execute_update(self, query: str, params: tuple = ()) -> int:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            conn.commit()
-            return cursor.lastrowid if cursor.lastrowid else cursor.rowcount
+        sql = self._translate_sql(query).strip()
+        is_insert = sql[:6].upper() == "INSERT" and "RETURNING" not in sql.upper()
+        if is_insert:
+            sql = f"{sql} RETURNING id"
+
+        with self._connection() as conn:
+            with conn.transaction():
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(sql, params)
+                    if is_insert:
+                        row = cur.fetchone()
+                        return int(row["id"]) if row and "id" in row else 0
+                    return int(cur.rowcount or 0)
+
+    @contextmanager
+    def transaction(self):
+        with self._connection() as conn:
+            with conn.transaction():
+                yield conn
     
     def authenticate_user(self, username: str, password: str) -> Optional[Dict]:
         import hashlib
@@ -420,9 +507,9 @@ class DatabaseManager:
         return self.execute_update(query, (receipt_number, sale_id, client_id, total_amount, amount_paid, balance, created_by))
     
     def get_next_receipt_number(self) -> str:
-        query = 'SELECT COUNT(*) + 1 FROM receipts'
+        query = 'SELECT COUNT(*) + 1 AS n FROM receipts'
         result = self.execute_query(query)
-        count = result[0]['COUNT(*) + 1'] if result else 1
+        count = int(result[0]['n']) if result else 1
         return f"RCP-{datetime.now().year}-{str(count).zfill(6)}"
 
     def get_next_weekly_invoice_number(self) -> str:
@@ -459,22 +546,20 @@ class DatabaseManager:
         row = self.execute_query('''
             SELECT 
                 (
-                    SELECT GROUP_CONCAT(
+                    SELECT string_agg(
                         COALESCE(gp.gas_type,'') ||
                         CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                         ' ' || COALESCE(gp.capacity,'')
-                        , ', '
+                        , ', ' ORDER BY si2.id
                     )
                     FROM sale_items si2
                     JOIN gas_products gp ON si2.gas_product_id = gp.id
                     WHERE si2.sale_id = s.id
-                    ORDER BY si2.id
                 ) AS product_summary,
                 (
-                    SELECT GROUP_CONCAT(si2.quantity, ', ')
+                    SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                     FROM sale_items si2
                     WHERE si2.sale_id = s.id
-                    ORDER BY si2.id
                 ) AS quantities_summary
             FROM sales s
             WHERE s.id = ?
@@ -492,22 +577,20 @@ class DatabaseManager:
             SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
                    s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount,
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = r.sale_id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = r.sale_id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM receipts r
             JOIN clients c ON r.client_id = c.id
@@ -523,22 +606,20 @@ class DatabaseManager:
             SELECT r.*, c.name as client_name, c.phone as client_phone, c.company as client_company,
                    s.quantity, s.unit_price, s.subtotal, s.tax_amount, s.total_amount,
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = r.sale_id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = r.sale_id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM receipts r
             JOIN clients c ON r.client_id = c.id
@@ -800,22 +881,20 @@ class DatabaseManager:
         query = f'''
             SELECT s.*, c.name as client_name, c.phone as client_phone,
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
@@ -840,22 +919,20 @@ class DatabaseManager:
         query = f'''
             SELECT s.*, 
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM sales s
             WHERE s.client_id = ?
@@ -868,22 +945,20 @@ class DatabaseManager:
         query = '''
             SELECT s.*, c.name as client_name, u.full_name as cashier_name,
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
@@ -894,9 +969,9 @@ class DatabaseManager:
         return self.execute_query(query, (day,))
     
     def get_next_gate_pass_number(self) -> str:
-        query = 'SELECT COUNT(*) + 1 FROM gate_passes'
+        query = 'SELECT COUNT(*) + 1 AS n FROM gate_passes'
         result = self.execute_query(query)
-        count = result[0]['COUNT(*) + 1'] if result else 1
+        count = int(result[0]['n']) if result else 1
         return f"GP-{datetime.now().year}-{str(count).zfill(6)}"
     
     def create_gate_pass(self, gate_pass_number: str, receipt_id: int, client_id: int, driver_name: str,
@@ -981,22 +1056,20 @@ class DatabaseManager:
         query = '''
             SELECT s.*, c.name as client_name, c.phone as client_phone,
                    (
-                       SELECT GROUP_CONCAT(
+                       SELECT string_agg(
                            COALESCE(gp.gas_type,'') ||
                            CASE WHEN gp.sub_type IS NOT NULL AND gp.sub_type != '' THEN ' ' || gp.sub_type ELSE '' END ||
                            ' ' || COALESCE(gp.capacity,'')
-                           , ', '
+                           , ', ' ORDER BY si2.id
                        )
                        FROM sale_items si2
                        JOIN gas_products gp ON si2.gas_product_id = gp.id
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS product_summary,
                    (
-                       SELECT GROUP_CONCAT(si2.quantity, ', ')
+                       SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                       ORDER BY si2.id
                    ) AS quantities_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
@@ -1204,7 +1277,7 @@ class DatabaseManager:
 
     def get_weekly_returns_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:
         query = '''
-            SELECT GROUP_CONCAT(summary, ', ') as result FROM (
+            SELECT string_agg(summary, ', ') as result FROM (
                 SELECT 
                     CASE 
                         WHEN gas_type = 'LPG' THEN 'L'
@@ -1225,7 +1298,7 @@ class DatabaseManager:
                         WHEN gas_type = 'LPG' AND capacity = '15kg' THEN ' 15'
                         WHEN gas_type = 'LPG' AND capacity IN ('12kg', '15kg') THEN ' 12/15'
                         ELSE ' ' || REPLACE(COALESCE(capacity,''), 'm3', '')
-                    END || ' ' || SUM(qty) as summary
+                    END || ' ' || SUM(qty)::text as summary
                 FROM (
                     SELECT gas_type, sub_type, capacity, quantity as qty FROM cylinder_returns
                     WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
@@ -1241,7 +1314,7 @@ class DatabaseManager:
 
     def get_weekly_sales_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:
         query = '''
-            SELECT GROUP_CONCAT(summary, ', ') as result FROM (
+            SELECT string_agg(summary, ', ') as result FROM (
                 SELECT 
                     CASE 
                         WHEN gp.gas_type = 'LPG' THEN 'L'
@@ -1262,7 +1335,7 @@ class DatabaseManager:
                         WHEN gp.gas_type = 'LPG' AND gp.capacity = '15kg' THEN ' 15'
                         WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg', '15kg') THEN ' 12/15'
                         ELSE ' ' || REPLACE(COALESCE(gp.capacity,''), 'm3', '')
-                    END || ' ' || SUM(qty) as summary
+                    END || ' ' || SUM(qty)::text as summary
                 FROM (
                     SELECT si.gas_product_id, si.quantity as qty FROM sale_items si
                     JOIN sales s ON si.sale_id = s.id

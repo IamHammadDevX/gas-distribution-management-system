@@ -22,6 +22,7 @@ class RajputGasManagement(QApplication):
         
         # Initialize database
         self.db = DatabaseManager()
+        self.aboutToQuit.connect(self.shutdown)
         
         # Initialize backup manager
         self.backup_manager = BackupManager(self.db)
@@ -69,6 +70,12 @@ class RajputGasManagement(QApplication):
                     pass
         except Exception as e:
             print(f"Automatic backup check failed: {str(e)}")
+
+    def shutdown(self):
+        try:
+            self.db.close()
+        except Exception:
+            pass
 
 def main():
     """Main entry point"""

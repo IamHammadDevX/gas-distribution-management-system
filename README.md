@@ -1,6 +1,6 @@
 # Rajput Gas Management System
 
-A comprehensive desktop application for managing gas cylinder sales, inventory, and operations. Built with PySide6 (Qt for Python) and SQLite database.
+A comprehensive desktop application for managing gas cylinder sales, inventory, and operations. Built with PySide6 (Qt for Python) and PostgreSQL database.
 
 ## 🏢 **Business Overview**
 
@@ -81,14 +81,13 @@ This system is designed for gas distribution companies to manage:
 
 ### 📱 **Complete Offline Functionality**
 - No internet connection required
-- Local SQLite database storage
-- All operations work offline
-- Self-contained application
+- Works fully on an office LAN (on-prem PostgreSQL)
+- Supports larger datasets and multiple concurrent users reliably
 
 ## 🛠️ **Technology Stack**
 
 - **Frontend:** PySide6 (Qt for Python)
-- **Database:** SQLite3
+- **Database:** PostgreSQL
 - **PDF Generation:** ReportLab
 - **Excel Export:** OpenPyXL, Pandas
 - **Security:** Cryptography (SHA-256 hashing)
@@ -115,12 +114,65 @@ cd Rajput_Gas_Ltd
 pip install -r requirements.txt
 ```
 
-### **3. Run the Application**
+### **3. Setup PostgreSQL (One-Time)**
+Create a dedicated database and user (example):
+
+```sql
+CREATE DATABASE rajput_gas;
+CREATE USER rajput_gas_app WITH PASSWORD 'REPLACE_WITH_STRONG_PASSWORD';
+GRANT CONNECT ON DATABASE rajput_gas TO rajput_gas_app;
+\c rajput_gas
+GRANT USAGE, CREATE ON SCHEMA public TO rajput_gas_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO rajput_gas_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO rajput_gas_app;
+```
+
+Set connection environment variables (PowerShell example):
+
+```powershell
+$env:PGHOST="127.0.0.1"
+$env:PGPORT="5432"
+$env:PGDATABASE="rajput_gas"
+$env:PGUSER="rajput_gas_app"
+$env:PGPASSWORD="REPLACE_WITH_STRONG_PASSWORD"
+$env:APP_TIMEZONE="Asia/Karachi"
+```
+
+You can also use a single `DATABASE_URL`:
+
+```powershell
+$env:DATABASE_URL="postgresql://rajput_gas_app:REPLACE_WITH_STRONG_PASSWORD@127.0.0.1:5432/rajput_gas"
+```
+
+### **Windows local bootstrap (scripted)**
+If you want one-command local setup on Windows, use:
+
+```powershell
+./scripts/setup_local_postgres.ps1
+```
+
+Then run the app with PostgreSQL environment variables preloaded:
+
+```powershell
+./scripts/run_app_postgres.ps1
+```
+
+Notes:
+- `setup_local_postgres.ps1` requires a **full PostgreSQL server installation** (must include `share/postgres.bki`).
+- If your PostgreSQL binaries are in a custom location, pass `-PgBinDir` and `-PgShareDir`.
+- Local PostgreSQL runtime files are ignored via `.gitignore` (`.postgres/`, `backups/`, dump/sql/bak files).
+
+### **Repository housekeeping**
+- Keep only source code and scripts in Git.
+- Do not commit local runtime artifacts (`.postgres/`, backup dumps, logs, temporary files).
+- If a failed local bootstrap leaves an empty or partial `.postgres/data` folder, it is safe to delete and re-run setup.
+
+### **4. Run the Application**
 ```bash
 python main.py
 ```
 
-### **4. First Login**
+### **5. First Login**
 - **Username:** admin
 - **Password:** admin123
 - **Role:** Administrator
@@ -258,9 +310,9 @@ Rajput_Gas_Ltd/
 - Check for missing files
 
 **2. Database Errors**
-- Ensure write permissions in application directory
-- Check database file integrity
-- Verify SQLite installation
+- Verify PostgreSQL is running and reachable
+- Verify `PGHOST`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` (or `DATABASE_URL`) are set correctly
+- Ensure the database user has permissions on schema `public`
 
 **3. PDF Generation Issues**
 - Check ReportLab installation
@@ -271,6 +323,30 @@ Rajput_Gas_Ltd/
 - Check disk space availability
 - Verify backup directory permissions
 - Ensure system time is correct
+- Ensure `pg_dump` and `pg_restore` are installed and on `PATH`
+- Ensure PostgreSQL credentials are provided via `PG*` env vars or `DATABASE_URL`
+
+## 🛡️ **Durability Notes**
+PostgreSQL is crash-safe for committed transactions (WAL), but "zero data loss" in real life requires operations discipline:
+- Run PostgreSQL on a reliable SSD
+- Use a UPS to handle sudden power loss
+- Take regular backups (pg_dump) and test restores
+- For maximum resilience, use streaming replication (hot standby) and/or WAL archiving for point-in-time recovery
+
+## 🔄 **Migrating From SQLite**
+If you have an existing `rajput_gas.db` (SQLite) and want to import it into PostgreSQL:
+
+```bash
+python migrate_sqlite_to_postgres.py --sqlite rajput_gas.db
+```
+
+To wipe the destination tables before importing (dangerous):
+
+```bash
+python migrate_sqlite_to_postgres.py --sqlite rajput_gas.db --wipe
+```
+
+`scripts/migrate_sqlite_to_postgres.py` is now a wrapper around the root migration script so both entry points behave identically.
 
 ### **Support Contact:**
 For technical support or questions, please contact the development team.

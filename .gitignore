@@ -61,6 +61,12 @@ venv.bak/
 *.db
 *.sqlite
 *.sqlite3
+*.dump
+*.sql
+*.bak
+
+# Local PostgreSQL runtime/binaries (workspace-local, never commit)
+.postgres/
 
 # Backup files
 backups/

@@ -649,7 +649,7 @@ class SettingsWidget(QWidget):
         
         if reply == QMessageBox.Yes:
             try:
-                query = "DELETE FROM activity_logs WHERE timestamp < datetime('now', '-90 days')"
+                query = "DELETE FROM activity_logs WHERE timestamp < (NOW() - INTERVAL '90 days')"
                 self.db_manager.execute_update(query)
                 
                 QMessageBox.information(self, "Success", "Old activity logs cleared successfully!")
