@@ -20,12 +20,60 @@ class AddClientDialog(QDialog):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+        self.resize(760, 560)
+
+        self.setStyleSheet("""
+            QDialog { background: #ffffff; }
+            QLabel { color: #1f2937; font-size: 13px; }
+            QGroupBox {
+                font-weight: 700;
+                color: #111827;
+                border: 1px solid #d8dde6;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+            }
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                border: 1px solid #cfd6e4;
+                border-radius: 6px;
+                padding: 6px 8px;
+                background: #ffffff;
+                color: #111827;
+                font-size: 13px;
+                min-height: 34px;
+                selection-background-color: #dbeafe;
+                selection-color: #111827;
+            }
+            QTextEdit { min-height: 86px; }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border: 1px solid #60a5fa;
+            }
+            QLineEdit::placeholder, QTextEdit::placeholder {
+                color: #6b7280;
+            }
+            QPushButton {
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+        """)
+
+        form_group = QGroupBox("Client Information")
+        form_group_layout = QVBoxLayout(form_group)
         
         # Form layout
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
+        form_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form_layout.setHorizontalSpacing(14)
         
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Enter client name")
@@ -50,7 +98,8 @@ class AddClientDialog(QDialog):
         self.previous_balance_input.setPrefix("Rs. ")
         form_layout.addRow("Previous Balance:", self.previous_balance_input)
         
-        layout.addLayout(form_layout)
+        form_group_layout.addLayout(form_layout)
+        layout.addWidget(form_group)
 
         self.initial_entries = []
         products = self.db_manager.get_gas_products()
@@ -100,7 +149,13 @@ class AddClientDialog(QDialog):
         self.initials_table.setAlternatingRowColors(True)
         self.initials_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.initials_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.initials_table.horizontalHeader().setStretchLastSection(True)
+        self.initials_table.verticalHeader().setVisible(False)
+        self.initials_table.setMinimumHeight(140)
+        self.initials_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.initials_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.initials_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.initials_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.initials_table.verticalHeader().setVisible(False)
         g_layout.addWidget(self.initials_table)
 
         layout.addWidget(group)
@@ -121,6 +176,30 @@ class AddClientDialog(QDialog):
             self.previous_balance_input.setValue(float(self.client_data.get('initial_previous_balance') or 0.0))
         except Exception:
             self.previous_balance_input.setValue(0.0)
+
+        try:
+            rows = self.db_manager.execute_query(
+                '''
+                SELECT gas_type, capacity, quantity
+                FROM client_initial_outstanding
+                WHERE client_id = ?
+                ORDER BY id
+                ''',
+                (self.client_data['id'],)
+            )
+            self.initial_entries = [
+                {
+                    'gas_type': r.get('gas_type'),
+                    'capacity': r.get('capacity'),
+                    'quantity': int(r.get('quantity') or 0)
+                }
+                for r in rows
+                if int(r.get('quantity') or 0) > 0
+            ]
+            self.refresh_initials_table()
+        except Exception:
+            self.initial_entries = []
+            self.refresh_initials_table()
     
     def get_client_data(self):
         """Get client data from form"""
@@ -159,12 +238,19 @@ class AddClientDialog(QDialog):
             self.initials_table.setItem(i, 1, QTableWidgetItem(e['capacity']))
             self.initials_table.setItem(i, 2, QTableWidgetItem(str(e['quantity'])))
             btn = QPushButton("Remove")
+            btn.setMinimumWidth(90)
+            btn.setStyleSheet(
+                "QPushButton { background-color: #e74c3c; color: white; border: 1px solid #c0392b; border-radius: 5px; padding: 5px 8px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #c0392b; }"
+                "QPushButton:pressed { background-color: #a93226; }"
+            )
             def remove_idx(idx=i):
                 if 0 <= idx < len(self.initial_entries):
                     self.initial_entries.pop(idx)
                     self.refresh_initials_table()
             btn.clicked.connect(remove_idx)
             self.initials_table.setCellWidget(i, 3, btn)
+            self.initials_table.setRowHeight(i, 34)
 
 class ClientsWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -176,8 +262,8 @@ class ClientsWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
         
         # Title
         title_label = QLabel("Client Management")
@@ -214,7 +300,18 @@ class ClientsWidget(QWidget):
         self.clients_table.setAlternatingRowColors(True)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.clients_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.clients_table.horizontalHeader().setStretchLastSection(True)
+        self.clients_table.verticalHeader().setVisible(False)
+        self.clients_table.setShowGrid(False)
+        self.clients_table.setWordWrap(False)
+        self.clients_table.horizontalHeader().setStretchLastSection(False)
+        self.clients_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.clients_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.clients_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.clients_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.clients_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.clients_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.clients_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.clients_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
         self.clients_table.setColumnWidth(0, 50)   # ID
         self.clients_table.setColumnWidth(1, 200)  # Name
         self.clients_table.setColumnWidth(2, 120)  # Phone
@@ -222,7 +319,7 @@ class ClientsWidget(QWidget):
         self.clients_table.setColumnWidth(4, 120)  # Total Purchases
         self.clients_table.setColumnWidth(5, 120)  # Total Paid
         self.clients_table.setColumnWidth(6, 100)  # Balance
-        self.clients_table.setColumnWidth(7, 150)  # Actions
+        self.clients_table.setColumnWidth(7, 280)  # Actions
         
         layout.addWidget(self.clients_table)
         
@@ -272,83 +369,44 @@ class ClientsWidget(QWidget):
             
                 actions_widget = QWidget()
                 actions_layout = QHBoxLayout(actions_widget)
-                actions_layout.setSpacing(5)
-                actions_layout.setContentsMargins(5, 5, 5, 5)
-            
+                actions_layout.setSpacing(6)
+                actions_layout.setContentsMargins(8, 4, 8, 4)
+
                 view_btn = QPushButton("View")
+                view_btn.setMinimumWidth(72)
                 view_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #17a2b8;
-                    color: white;
-                    border: 1px solid #138496;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    min-width: 60px;
-                }
-                QPushButton:hover {
-                    background-color: #138496;
-                    border-color: #117a8b;
-                }
-                QPushButton:pressed {
-                    background-color: #117a8b;
-                    border-color: #0c5460;
-                }
-            """)
+                    QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                    QPushButton:hover { background-color: #138496; }
+                    QPushButton:pressed { background-color: #117a8b; }
+                """)
                 view_btn.clicked.connect(lambda checked, c=client: self.view_client(c))
                 actions_layout.addWidget(view_btn)
             
                 edit_btn = QPushButton("Edit")
+                edit_btn.setMinimumWidth(72)
                 edit_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #28a745;
-                    color: white;
-                    border: 1px solid #1e7e34;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    min-width: 60px;
-                }
-                QPushButton:hover {
-                    background-color: #218838;
-                    border-color: #1e7e34;
-                }
-                QPushButton:pressed {
-                    background-color: #1e7e34;
-                    border-color: #155724;
-                }
-            """)
+                    QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                    QPushButton:hover { background-color: #218838; }
+                    QPushButton:pressed { background-color: #1e7e34; }
+                """)
                 edit_btn.clicked.connect(lambda checked, c=client: self.edit_client(c))
                 actions_layout.addWidget(edit_btn)
             
                 if self.current_user['role'] == 'Admin':
                     delete_btn = QPushButton("Delete")
+                    delete_btn.setMinimumWidth(72)
                     delete_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #dc3545;
-                        color: white;
-                        border: 1px solid #bd2130;
-                        border-radius: 4px;
-                        padding: 6px 12px;
-                        font-size: 12px;
-                        font-weight: 500;
-                        min-width: 60px;
-                    }
-                    QPushButton:hover {
-                        background-color: #c82333;
-                        border-color: #bd2130;
-                    }
-                    QPushButton:pressed {
-                        background-color: #bd2130;
-                        border-color: #721c24;
-                    }
-                """)
+                        QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                        QPushButton:hover { background-color: #c82333; }
+                        QPushButton:pressed { background-color: #bd2130; }
+                    """)
                     delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
                     actions_layout.addWidget(delete_btn)
 
+                actions_layout.addStretch()
+
                 self.clients_table.setCellWidget(row, 7, actions_widget)
+                self.clients_table.setRowHeight(row, 44)
     
     def filter_clients(self):
         """Filter clients based on search input"""
@@ -453,7 +511,8 @@ class ClientsWidget(QWidget):
         
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Client Details - {client['name']}")
-        dialog.setFixedSize(750, 500)
+        dialog.setMinimumSize(900, 620)
+        dialog.resize(980, 700)
         
         layout = QVBoxLayout(dialog)
         layout.setSpacing(15)
@@ -490,6 +549,15 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
         purchases_table.setAlternatingRowColors(True)
         purchases_table.setSelectionBehavior(QTableWidget.SelectRows)
         purchases_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        purchases_table.verticalHeader().setVisible(False)
+        purchases_table.setMinimumHeight(180)
+        p_header = purchases_table.horizontalHeader()
+        p_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        p_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        p_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        p_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        p_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        p_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         
         # Load recent purchases for this client
         try:
@@ -509,7 +577,7 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
         except Exception as e:
             QMessageBox.warning(self, "Database Error", f"Failed to load purchase history: {str(e)}")
         
-        layout.addWidget(purchases_table)
+        layout.addWidget(purchases_table, 1)
         layout.addWidget(QLabel("<b>Pending Cylinders Summary:</b>"))
         cyl_table = QTableWidget()
         cyl_table.setColumnCount(6)
@@ -517,6 +585,15 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
         cyl_table.setAlternatingRowColors(True)
         cyl_table.setSelectionBehavior(QTableWidget.SelectRows)
         cyl_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        cyl_table.verticalHeader().setVisible(False)
+        cyl_table.setMinimumHeight(180)
+        c_header = cyl_table.horizontalHeader()
+        c_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        c_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        c_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        c_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        c_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        c_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         try:
             rows = self.db_manager.get_client_cylinder_status(client['id'])
             cyl_table.setRowCount(len(rows))
@@ -532,12 +609,7 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
             cyl_table.resizeColumnsToContents()
         except Exception:
             pass
-        layout.addWidget(cyl_table)
-        
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
+        layout.addWidget(cyl_table, 2)
         
         dialog.exec()
     

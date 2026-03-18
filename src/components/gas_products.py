@@ -190,14 +190,24 @@ class GasProductsWidget(QWidget):
         self.products_table.setAlternatingRowColors(True)
         self.products_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.products_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.products_table.horizontalHeader().setStretchLastSection(True)
+        self.products_table.verticalHeader().setVisible(False)
+        self.products_table.setShowGrid(False)
+        self.products_table.setWordWrap(False)
+        self.products_table.horizontalHeader().setStretchLastSection(False)
+        self.products_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.products_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.products_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.products_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.products_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.products_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
         self.products_table.setColumnWidth(0, 50)   # ID
         self.products_table.setColumnWidth(1, 120)  # Gas Type
         self.products_table.setColumnWidth(2, 100)  # Sub Type
         self.products_table.setColumnWidth(3, 100)  # Capacity
         self.products_table.setColumnWidth(4, 100)  # Unit Price
-        self.products_table.setColumnWidth(5, 200)  # Description
-        self.products_table.setColumnWidth(6, 150)  # Actions
+        self.products_table.setColumnWidth(5, 260)  # Description
+        self.products_table.setColumnWidth(6, 240)  # Actions
         
         layout.addWidget(self.products_table)
         
@@ -247,8 +257,8 @@ class GasProductsWidget(QWidget):
             # Actions
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setSpacing(5)
-            actions_layout.setContentsMargins(5, 5, 5, 5)
+            actions_layout.setSpacing(6)
+            actions_layout.setContentsMargins(8, 4, 8, 4)
             
             edit_btn = QPushButton("Edit")
             edit_btn.setStyleSheet("""
@@ -288,8 +298,11 @@ class GasProductsWidget(QWidget):
                 delete_btn.setFixedHeight(32)
                 delete_btn.clicked.connect(lambda checked, p=product: self.delete_product(p))
                 actions_layout.addWidget(delete_btn)
+
+            actions_layout.addStretch()
             
             self.products_table.setCellWidget(row, 6, actions_widget)
+            self.products_table.setRowHeight(row, 44)
     
     def filter_products(self):
         """Filter products based on search input"""

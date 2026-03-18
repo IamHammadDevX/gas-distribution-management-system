@@ -220,6 +220,7 @@ class DatabaseManager:
                 id BIGSERIAL PRIMARY KEY,
                 client_id BIGINT NOT NULL REFERENCES clients(id),
                 gas_type TEXT NOT NULL,
+                sub_type TEXT,
                 capacity TEXT NOT NULL,
                 quantity INTEGER NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -329,6 +330,7 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_vehicle_expenses_expense_date ON vehicle_expenses (expense_date)",
             "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name)",
             "CREATE INDEX IF NOT EXISTS idx_clients_company ON clients (company)",
+            "CREATE INDEX IF NOT EXISTS idx_client_initial_outstanding_client ON client_initial_outstanding (client_id)",
         ]
 
         with self._connection() as conn:
@@ -336,6 +338,7 @@ class DatabaseManager:
                 with conn.cursor() as cur:
                     for ddl in ddl_statements:
                         cur.execute(ddl)
+                    cur.execute("ALTER TABLE client_initial_outstanding ADD COLUMN IF NOT EXISTS sub_type TEXT")
 
         rows = self.execute_query("SELECT COUNT(*) AS n FROM users WHERE role = 'Admin'")
         if not rows or int(rows[0]["n"]) == 0:
@@ -1042,12 +1045,34 @@ class DatabaseManager:
     def get_empty_stock_by_category(self, day: Optional[str] = None) -> List[Dict]:
         raise NotImplementedError("Cylinder returns feature removed")
     
-    def add_client_initial_outstanding(self, client_id: int, gas_type: str, capacity: str, quantity: int) -> int:
+    def add_client_initial_outstanding(self, client_id: int, gas_type: str, capacity: str, quantity: int, sub_type: Optional[str] = None) -> int:
         query = '''
-            INSERT INTO client_initial_outstanding (client_id, gas_type, capacity, quantity)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO client_initial_outstanding (client_id, gas_type, sub_type, capacity, quantity)
+            VALUES (?, ?, ?, ?, ?)
         '''
-        return self.execute_update(query, (client_id, gas_type, capacity, int(quantity)))
+        return self.execute_update(query, (client_id, gas_type, sub_type if sub_type else None, capacity, int(quantity)))
+
+    def replace_client_initial_outstanding(self, client_id: int, entries: List[Dict[str, Any]]) -> None:
+        with self.transaction() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("DELETE FROM client_initial_outstanding WHERE client_id = %s", (client_id,))
+                for entry in entries:
+                    qty = int(entry.get('quantity') or 0)
+                    if qty <= 0:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO client_initial_outstanding (client_id, gas_type, sub_type, capacity, quantity)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            client_id,
+                            entry.get('gas_type'),
+                            entry.get('sub_type') or None,
+                            entry.get('capacity'),
+                            qty,
+                        ),
+                    )
 
     def get_employees(self) -> List[Dict]:
         query = 'SELECT * FROM employees WHERE is_active = 1 ORDER BY name'
@@ -1132,14 +1157,14 @@ class DatabaseManager:
 
         init_rows = self.execute_query(
             '''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            SELECT gas_type, COALESCE(sub_type,'') AS sub_type, capacity, COALESCE(SUM(quantity),0) AS qty
             FROM client_initial_outstanding
             WHERE client_id = ?
-            GROUP BY gas_type, capacity
+            GROUP BY gas_type, COALESCE(sub_type,''), capacity
             ''',
             (client_id,)
         )
-        init_map = {(r['gas_type'], r['capacity']): int(r['qty']) for r in init_rows}
+        init_map = {(r['gas_type'], r.get('sub_type') or '', r['capacity']): int(r['qty']) for r in init_rows}
 
         sale_items = self.execute_query(
             '''
@@ -1205,7 +1230,8 @@ class DatabaseManager:
         group_data = {}
         for (gas_type, sub_type, cap) in keys:
             gcap = group_cap(gas_type, cap)
-            delivered = delivered_map.get((gas_type, sub_type, cap), 0) + init_map.get((gas_type, cap), 0)
+            delivered = delivered_map.get((gas_type, sub_type, cap), 0)
+            delivered += init_map.get((gas_type, sub_type or '', cap), 0)
             returned = returned_map.get((gas_type, sub_type, cap), 0)
             key = (gas_type, sub_type, gcap)
             agg = group_data.get(key)
