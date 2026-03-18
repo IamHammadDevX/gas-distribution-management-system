@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PySide6.QtCore import Qt, QDateTime
 from src.database_module import DatabaseManager
 from src.components.backup import BackupManager
+from src.components.ui_helpers import as_text, as_datetime_text, table_batch_update
 import os
 
 class SettingsWidget(QWidget):
@@ -378,15 +379,16 @@ class SettingsWidget(QWidget):
                 ORDER BY username
             '''
             users = self.db_manager.execute_query(query)
-            
-            self.users_table.setRowCount(len(users))
-            
-            for row, user in enumerate(users):
-                self.users_table.setItem(row, 0, QTableWidgetItem(str(user['id'])))
-                self.users_table.setItem(row, 1, QTableWidgetItem(user['username']))
-                self.users_table.setItem(row, 2, QTableWidgetItem(user['full_name']))
-                self.users_table.setItem(row, 3, QTableWidgetItem(user['role']))
-                self.users_table.setItem(row, 4, QTableWidgetItem('Active' if user['is_active'] else 'Inactive'))
+
+            with table_batch_update(self.users_table):
+                self.users_table.setRowCount(len(users))
+
+                for row, user in enumerate(users):
+                    self.users_table.setItem(row, 0, QTableWidgetItem(as_text(user.get('id'))))
+                    self.users_table.setItem(row, 1, QTableWidgetItem(as_text(user.get('username'))))
+                    self.users_table.setItem(row, 2, QTableWidgetItem(as_text(user.get('full_name'))))
+                    self.users_table.setItem(row, 3, QTableWidgetItem(as_text(user.get('role'))))
+                    self.users_table.setItem(row, 4, QTableWidgetItem('Active' if user['is_active'] else 'Inactive'))
             
             self.users_table.resizeColumnsToContents()
             
@@ -498,21 +500,20 @@ class SettingsWidget(QWidget):
         """Load backup history"""
         try:
             backups = self.backup_manager.get_backup_history(30)
-            
-            self.backup_table.setRowCount(len(backups))
-            
-            for row, backup in enumerate(backups):
-                self.backup_table.setItem(row, 0, QTableWidgetItem(backup['created_at']))
-                self.backup_table.setItem(row, 1, QTableWidgetItem(backup['backup_path']))
-                
-                # Convert size to MB
-                size_mb = backup['backup_size'] / (1024 * 1024)
-                self.backup_table.setItem(row, 2, QTableWidgetItem(f"{size_mb:.2f}"))
-                
-                # Add restore button
-                restore_btn = QPushButton("Restore")
-                restore_btn.clicked.connect(lambda checked, path=backup['backup_path']: self.restore_specific_backup(path))
-                self.backup_table.setCellWidget(row, 3, restore_btn)
+
+            with table_batch_update(self.backup_table):
+                self.backup_table.setRowCount(len(backups))
+
+                for row, backup in enumerate(backups):
+                    self.backup_table.setItem(row, 0, QTableWidgetItem(as_datetime_text(backup.get('created_at'), 19)))
+                    self.backup_table.setItem(row, 1, QTableWidgetItem(as_text(backup.get('backup_path'))))
+
+                    size_mb = float(backup.get('backup_size') or 0) / (1024 * 1024)
+                    self.backup_table.setItem(row, 2, QTableWidgetItem(f"{size_mb:.2f}"))
+
+                    restore_btn = QPushButton("Restore")
+                    restore_btn.clicked.connect(lambda checked, path=backup['backup_path']: self.restore_specific_backup(path))
+                    self.backup_table.setCellWidget(row, 3, restore_btn)
             
             self.backup_table.resizeColumnsToContents()
             

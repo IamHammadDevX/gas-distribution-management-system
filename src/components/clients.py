@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTextEdit, QComboBox, QHeaderView, QDoubleSpinBox, QSpinBox, QGroupBox)
 from PySide6.QtCore import Qt, Signal
 from src.database_module import DatabaseManager
+from src.components.ui_helpers import as_text, as_money, table_batch_update
 
 class AddClientDialog(QDialog):
     def __init__(self, db_manager: DatabaseManager, parent=None, client_data=None):
@@ -245,46 +246,37 @@ class ClientsWidget(QWidget):
     
     def populate_table(self, clients):
         """Populate table with client data"""
-        self.clients_table.setRowCount(len(clients))
-        
-        for row, client in enumerate(clients):
-            # ID
-            self.clients_table.setItem(row, 0, QTableWidgetItem(str(client['id'])))
+        with table_batch_update(self.clients_table):
+            self.clients_table.setRowCount(len(clients))
+
+            for row, client in enumerate(clients):
+                self.clients_table.setItem(row, 0, QTableWidgetItem(as_text(client.get('id'))))
+                self.clients_table.setItem(row, 1, QTableWidgetItem(as_text(client.get('name'))))
+                self.clients_table.setItem(row, 2, QTableWidgetItem(as_text(client.get('phone'))))
+                self.clients_table.setItem(row, 3, QTableWidgetItem(as_text(client.get('company') or '')))
+
+                purchases_item = QTableWidgetItem(as_money(client.get('total_purchases')))
+                purchases_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.clients_table.setItem(row, 4, purchases_item)
+
+                paid_item = QTableWidgetItem(as_money(client.get('total_paid')))
+                paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.clients_table.setItem(row, 5, paid_item)
+
+                balance_value = float(client.get('balance') or 0)
+                balance_item = QTableWidgetItem(as_money(balance_value))
+                balance_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if balance_value > 0:
+                    balance_item.setForeground(Qt.red)
+                self.clients_table.setItem(row, 6, balance_item)
             
-            # Name
-            self.clients_table.setItem(row, 1, QTableWidgetItem(client['name']))
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setSpacing(5)
+                actions_layout.setContentsMargins(5, 5, 5, 5)
             
-            # Phone
-            self.clients_table.setItem(row, 2, QTableWidgetItem(client['phone']))
-            
-            # Company
-            self.clients_table.setItem(row, 3, QTableWidgetItem(client['company'] or ''))
-            
-            # Total Purchases
-            purchases_item = QTableWidgetItem(f"Rs. {client['total_purchases']:,.2f}")
-            purchases_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.clients_table.setItem(row, 4, purchases_item)
-            
-            # Total Paid
-            paid_item = QTableWidgetItem(f"Rs. {client['total_paid']:,.2f}")
-            paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.clients_table.setItem(row, 5, paid_item)
-            
-            # Balance
-            balance_item = QTableWidgetItem(f"Rs. {client['balance']:,.2f}")
-            balance_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            if client['balance'] > 0:
-                balance_item.setForeground(Qt.red)
-            self.clients_table.setItem(row, 6, balance_item)
-            
-            # Actions
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setSpacing(5)
-            actions_layout.setContentsMargins(5, 5, 5, 5)
-            
-            view_btn = QPushButton("View")
-            view_btn.setStyleSheet("""
+                view_btn = QPushButton("View")
+                view_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #17a2b8;
                     color: white;
@@ -304,11 +296,11 @@ class ClientsWidget(QWidget):
                     border-color: #0c5460;
                 }
             """)
-            view_btn.clicked.connect(lambda checked, c=client: self.view_client(c))
-            actions_layout.addWidget(view_btn)
+                view_btn.clicked.connect(lambda checked, c=client: self.view_client(c))
+                actions_layout.addWidget(view_btn)
             
-            edit_btn = QPushButton("Edit")
-            edit_btn.setStyleSheet("""
+                edit_btn = QPushButton("Edit")
+                edit_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #28a745;
                     color: white;
@@ -328,12 +320,12 @@ class ClientsWidget(QWidget):
                     border-color: #155724;
                 }
             """)
-            edit_btn.clicked.connect(lambda checked, c=client: self.edit_client(c))
-            actions_layout.addWidget(edit_btn)
+                edit_btn.clicked.connect(lambda checked, c=client: self.edit_client(c))
+                actions_layout.addWidget(edit_btn)
             
-            if self.current_user['role'] == 'Admin':
-                delete_btn = QPushButton("Delete")
-                delete_btn.setStyleSheet("""
+                if self.current_user['role'] == 'Admin':
+                    delete_btn = QPushButton("Delete")
+                    delete_btn.setStyleSheet("""
                     QPushButton {
                         background-color: #dc3545;
                         color: white;
@@ -353,10 +345,10 @@ class ClientsWidget(QWidget):
                         border-color: #721c24;
                     }
                 """)
-                delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
-                actions_layout.addWidget(delete_btn)
-            
-            self.clients_table.setCellWidget(row, 7, actions_widget)
+                    delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
+                    actions_layout.addWidget(delete_btn)
+
+                self.clients_table.setCellWidget(row, 7, actions_widget)
     
     def filter_clients(self):
         """Filter clients based on search input"""

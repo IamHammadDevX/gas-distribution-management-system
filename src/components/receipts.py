@@ -9,6 +9,7 @@ from PySide6.QtCore import QSizeF
 from PySide6.QtGui import QPageSize, QPageLayout
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from src.database_module import DatabaseManager
+from src.components.ui_helpers import as_datetime_text, as_money, as_text, table_batch_update
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -582,90 +583,82 @@ class ReceiptsWidget(QWidget):
     
     def populate_table(self, receipts):
         """Populate table with receipt data"""
-        self.receipts_table.setRowCount(len(receipts))
-        
-        for row, receipt in enumerate(receipts):
-            # Receipt Number
-            self.receipts_table.setItem(row, 0, QTableWidgetItem(receipt['receipt_number']))
-            
-            # Date
-            self.receipts_table.setItem(row, 1, QTableWidgetItem(receipt['created_at'][:16]))
-            
-            # Client
-            client_text = receipt['client_name']
-            if receipt['client_company']:
-                client_text += f" ({receipt['client_company']})"
-            self.receipts_table.setItem(row, 2, QTableWidgetItem(client_text))
-            
-            # Products
-            product_text = receipt.get('product_summary') or ''
-            self.receipts_table.setItem(row, 3, QTableWidgetItem(product_text))
-            
-            # Quantities
-            quantities_text = receipt.get('quantities_summary') or str(receipt.get('quantity') or '')
-            self.receipts_table.setItem(row, 4, QTableWidgetItem(quantities_text))
-            
-            # Total
-            total_item = QTableWidgetItem(f"Rs. {receipt['total_amount']:,.2f}")
-            total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.receipts_table.setItem(row, 5, total_item)
-            
-            # Paid
-            paid_item = QTableWidgetItem(f"Rs. {receipt['amount_paid']:,.2f}")
-            paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.receipts_table.setItem(row, 6, paid_item)
-            
-            # Balance
-            balance_item = QTableWidgetItem(f"Rs. {receipt['balance']:,.2f}")
-            balance_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            if receipt['balance'] > 0:
-                balance_item.setForeground(Qt.red)
-            elif receipt['balance'] < 0:
-                balance_item.setForeground(Qt.darkYellow)
-            else:
-                balance_item.setForeground(Qt.darkGreen)
-            self.receipts_table.setItem(row, 7, balance_item)
-            
-            # Actions
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setSpacing(5)
-            actions_layout.setContentsMargins(5, 5, 5, 5)
-            
-            view_btn = QPushButton("View")
-            view_btn.setStyleSheet("""
-                QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
-                QPushButton:hover { background-color: #138496; }
-                QPushButton:pressed { background-color: #117a8b; }
-            """)
-            view_btn.setMinimumWidth(96)
-            view_btn.setFixedHeight(32)
-            view_btn.clicked.connect(lambda checked, r=receipt: self.view_receipt(r))
-            actions_layout.addWidget(view_btn)
+        with table_batch_update(self.receipts_table):
+            self.receipts_table.setRowCount(len(receipts))
 
-            print_btn = QPushButton("Print")
-            print_btn.setStyleSheet("""
-                QPushButton { background-color: #f39c12; color: white; border: 1px solid #d68910; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
-                QPushButton:hover { background-color: #d68910; }
-                QPushButton:pressed { background-color: #b9770e; }
-            """)
-            print_btn.setMinimumWidth(96)
-            print_btn.setFixedHeight(32)
-            print_btn.clicked.connect(lambda checked, r=receipt: self.print_receipt(r))
-            actions_layout.addWidget(print_btn)
+            for row, receipt in enumerate(receipts):
+                self.receipts_table.setItem(row, 0, QTableWidgetItem(as_text(receipt.get('receipt_number'))))
+                self.receipts_table.setItem(row, 1, QTableWidgetItem(as_datetime_text(receipt.get('created_at'), 16)))
 
-            export_btn = QPushButton("Export PDF")
-            export_btn.setStyleSheet("""
-                QPushButton { background-color: #2c3e50; color: white; border: 1px solid #1f2d3a; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
-                QPushButton:hover { background-color: #1f2d3a; }
-                QPushButton:pressed { background-color: #16222c; }
-            """)
-            export_btn.setMinimumWidth(110)
-            export_btn.setFixedHeight(32)
-            export_btn.clicked.connect(lambda checked, r=receipt: self.export_receipt_pdf(r))
-            actions_layout.addWidget(export_btn)
+                client_text = as_text(receipt.get('client_name'))
+                if receipt.get('client_company'):
+                    client_text += f" ({receipt['client_company']})"
+                self.receipts_table.setItem(row, 2, QTableWidgetItem(client_text))
+
+                product_text = as_text(receipt.get('product_summary') or '')
+                self.receipts_table.setItem(row, 3, QTableWidgetItem(product_text))
+
+                quantities_text = as_text(receipt.get('quantities_summary') or receipt.get('quantity') or '')
+                self.receipts_table.setItem(row, 4, QTableWidgetItem(quantities_text))
+
+                total_item = QTableWidgetItem(as_money(receipt.get('total_amount')))
+                total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.receipts_table.setItem(row, 5, total_item)
+
+                paid_item = QTableWidgetItem(as_money(receipt.get('amount_paid')))
+                paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.receipts_table.setItem(row, 6, paid_item)
+
+                balance_value = float(receipt.get('balance') or 0)
+                balance_item = QTableWidgetItem(as_money(balance_value))
+                balance_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if balance_value > 0:
+                    balance_item.setForeground(Qt.red)
+                elif balance_value < 0:
+                    balance_item.setForeground(Qt.darkYellow)
+                else:
+                    balance_item.setForeground(Qt.darkGreen)
+                self.receipts_table.setItem(row, 7, balance_item)
             
-            self.receipts_table.setCellWidget(row, 8, actions_widget)
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setSpacing(5)
+                actions_layout.setContentsMargins(5, 5, 5, 5)
+            
+                view_btn = QPushButton("View")
+                view_btn.setStyleSheet("""
+                    QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                    QPushButton:hover { background-color: #138496; }
+                    QPushButton:pressed { background-color: #117a8b; }
+                """)
+                view_btn.setMinimumWidth(96)
+                view_btn.setFixedHeight(32)
+                view_btn.clicked.connect(lambda checked, r=receipt: self.view_receipt(r))
+                actions_layout.addWidget(view_btn)
+
+                print_btn = QPushButton("Print")
+                print_btn.setStyleSheet("""
+                    QPushButton { background-color: #f39c12; color: white; border: 1px solid #d68910; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                    QPushButton:hover { background-color: #d68910; }
+                    QPushButton:pressed { background-color: #b9770e; }
+                """)
+                print_btn.setMinimumWidth(96)
+                print_btn.setFixedHeight(32)
+                print_btn.clicked.connect(lambda checked, r=receipt: self.print_receipt(r))
+                actions_layout.addWidget(print_btn)
+
+                export_btn = QPushButton("Export PDF")
+                export_btn.setStyleSheet("""
+                    QPushButton { background-color: #2c3e50; color: white; border: 1px solid #1f2d3a; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+                    QPushButton:hover { background-color: #1f2d3a; }
+                    QPushButton:pressed { background-color: #16222c; }
+                """)
+                export_btn.setMinimumWidth(110)
+                export_btn.setFixedHeight(32)
+                export_btn.clicked.connect(lambda checked, r=receipt: self.export_receipt_pdf(r))
+                actions_layout.addWidget(export_btn)
+
+                self.receipts_table.setCellWidget(row, 8, actions_widget)
     
     def filter_receipts(self):
         """Filter receipts based on search input"""

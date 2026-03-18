@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
+from src.components.ui_helpers import as_datetime_text, as_money, as_text, table_batch_update
 
 class SalesWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -599,24 +600,28 @@ class SalesWidget(QWidget):
     def load_recent_sales(self):
         try:
             sales = self.db_manager.get_recent_sales_with_summaries(limit=20)
-            self.recent_sales_table.setRowCount(len(sales))
-            for row, sale in enumerate(sales):
-                self.recent_sales_table.setItem(row, 0, QTableWidgetItem(sale['created_at'][:16]))
-                self.recent_sales_table.setItem(row, 1, QTableWidgetItem(sale['client_name']))
-                self.recent_sales_table.setItem(row, 2, QTableWidgetItem(sale.get('product_summary') or ''))
-                self.recent_sales_table.setItem(row, 3, QTableWidgetItem(sale.get('quantities_summary') or str(sale.get('quantity') or '')))
-                self.recent_sales_table.setItem(row, 4, QTableWidgetItem(f"Rs. {sale['total_amount']:,.2f}"))
-                self.recent_sales_table.setItem(row, 5, QTableWidgetItem(f"Rs. {sale['amount_paid']:,.2f}"))
-                self.recent_sales_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['balance']:,.2f}"))
-                if sale['balance'] > 0:
-                    self.recent_sales_table.item(row, 6).setForeground(Qt.red)
-                elif sale['balance'] < 0:
-                    self.recent_sales_table.item(row, 6).setForeground(Qt.darkYellow)
-                else:
-                    self.recent_sales_table.item(row, 6).setForeground(Qt.darkGreen)
-                generate_btn = QPushButton("Generate Receipt")
-                generate_btn.clicked.connect(lambda checked, s=sale: self.generate_receipt_for_sale(s))
-                self.recent_sales_table.setCellWidget(row, 7, generate_btn)
+            with table_batch_update(self.recent_sales_table):
+                self.recent_sales_table.setRowCount(len(sales))
+                for row, sale in enumerate(sales):
+                    self.recent_sales_table.setItem(row, 0, QTableWidgetItem(as_datetime_text(sale.get('created_at'), 16)))
+                    self.recent_sales_table.setItem(row, 1, QTableWidgetItem(as_text(sale.get('client_name'))))
+                    self.recent_sales_table.setItem(row, 2, QTableWidgetItem(as_text(sale.get('product_summary') or '')))
+                    self.recent_sales_table.setItem(row, 3, QTableWidgetItem(as_text(sale.get('quantities_summary') or sale.get('quantity') or '')))
+                    self.recent_sales_table.setItem(row, 4, QTableWidgetItem(as_money(sale.get('total_amount'))))
+                    self.recent_sales_table.setItem(row, 5, QTableWidgetItem(as_money(sale.get('amount_paid'))))
+                    self.recent_sales_table.setItem(row, 6, QTableWidgetItem(as_money(sale.get('balance'))))
+
+                    balance_value = float(sale.get('balance') or 0)
+                    if balance_value > 0:
+                        self.recent_sales_table.item(row, 6).setForeground(Qt.red)
+                    elif balance_value < 0:
+                        self.recent_sales_table.item(row, 6).setForeground(Qt.darkYellow)
+                    else:
+                        self.recent_sales_table.item(row, 6).setForeground(Qt.darkGreen)
+
+                    generate_btn = QPushButton("Generate Receipt")
+                    generate_btn.clicked.connect(lambda checked, s=sale: self.generate_receipt_for_sale(s))
+                    self.recent_sales_table.setCellWidget(row, 7, generate_btn)
             self.recent_sales_table.resizeColumnsToContents()
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load recent sales: {str(e)}")

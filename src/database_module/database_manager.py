@@ -317,10 +317,18 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)",
             "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)",
+            "CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)",
+            "CREATE INDEX IF NOT EXISTS idx_gate_passes_created_at ON gate_passes (created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_gate_passes_time_out ON gate_passes (time_out)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_client_week ON weekly_invoices (client_id, week_start, week_end)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_status ON weekly_invoices (status)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_payments_invoice ON weekly_payments (weekly_invoice_id)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_payments_payment_date ON weekly_payments (payment_date)",
             "CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_vehicle_expenses_expense_date ON vehicle_expenses (expense_date)",
+            "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name)",
+            "CREATE INDEX IF NOT EXISTS idx_clients_company ON clients (company)",
         ]
 
         with self._connection() as conn:
@@ -1294,19 +1302,29 @@ class DatabaseManager:
                         ELSE '' 
                     END || 
                     CASE 
-                        WHEN gas_type = 'LPG' AND capacity = '12kg' THEN ' 12'
-                        WHEN gas_type = 'LPG' AND capacity = '15kg' THEN ' 15'
-                        WHEN gas_type = 'LPG' AND capacity IN ('12kg', '15kg') THEN ' 12/15'
-                        ELSE ' ' || REPLACE(COALESCE(capacity,''), 'm3', '')
+                        WHEN gas_type = 'LPG' AND cap_group = '12kg' THEN ' 12'
+                        WHEN gas_type = 'LPG' AND cap_group = '15kg' THEN ' 15'
+                        WHEN gas_type = 'LPG' AND cap_group = '12/15kg' THEN ' 12/15'
+                        ELSE ' ' || REPLACE(COALESCE(cap_group,''), 'm3', '')
                     END || ' ' || SUM(qty)::text as summary
                 FROM (
-                    SELECT gas_type, sub_type, capacity, quantity as qty FROM cylinder_returns
+                    SELECT 
+                        gas_type,
+                        sub_type,
+                        CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
+                        quantity as qty
+                    FROM cylinder_returns
                     WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
                     UNION ALL
-                    SELECT gas_type, NULL as sub_type, capacity, quantity as qty FROM gate_passes
+                    SELECT 
+                        gas_type,
+                        NULL as sub_type,
+                        CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
+                        quantity as qty
+                    FROM gate_passes
                     WHERE client_id = ? AND time_in IS NOT NULL AND DATE(time_in, 'localtime') BETWEEN ? AND ?
                 ) t
-                GROUP BY gas_type, sub_type, CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END
+                GROUP BY gas_type, sub_type, cap_group
             )
         '''
         rows = self.execute_query(query, (client_id, week_start, week_end, client_id, week_start, week_end))
@@ -1331,22 +1349,32 @@ class DatabaseManager:
                         ELSE '' 
                     END || 
                     CASE 
-                        WHEN gp.gas_type = 'LPG' AND gp.capacity = '12kg' THEN ' 12'
-                        WHEN gp.gas_type = 'LPG' AND gp.capacity = '15kg' THEN ' 15'
-                        WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg', '15kg') THEN ' 12/15'
-                        ELSE ' ' || REPLACE(COALESCE(gp.capacity,''), 'm3', '')
+                        WHEN gp.gas_type = 'LPG' AND cap_group = '12kg' THEN ' 12'
+                        WHEN gp.gas_type = 'LPG' AND cap_group = '15kg' THEN ' 15'
+                        WHEN gp.gas_type = 'LPG' AND cap_group = '12/15kg' THEN ' 12/15'
+                        ELSE ' ' || REPLACE(COALESCE(cap_group,''), 'm3', '')
                     END || ' ' || SUM(qty)::text as summary
                 FROM (
-                    SELECT si.gas_product_id, si.quantity as qty FROM sale_items si
+                    SELECT 
+                        si.gas_product_id,
+                        si.quantity as qty,
+                        CASE WHEN gp.gas_type='LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END AS cap_group
+                    FROM sale_items si
                     JOIN sales s ON si.sale_id = s.id
+                    JOIN gas_products gp ON si.gas_product_id = gp.id
                     WHERE s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
                     UNION ALL
-                    SELECT s.gas_product_id, s.quantity as qty FROM sales s
+                    SELECT 
+                        s.gas_product_id,
+                        s.quantity as qty,
+                        CASE WHEN gp.gas_type='LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END AS cap_group
+                    FROM sales s
                     LEFT JOIN sale_items si ON si.sale_id = s.id
+                    JOIN gas_products gp ON s.gas_product_id = gp.id
                     WHERE s.client_id = ? AND si.id IS NULL AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
                 ) t
                 JOIN gas_products gp ON t.gas_product_id = gp.id
-                GROUP BY gp.gas_type, gp.sub_type, CASE WHEN gp.gas_type='LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END
+                GROUP BY gp.gas_type, gp.sub_type, cap_group
             )
         '''
         rows = self.execute_query(query, (client_id, week_start, week_end, client_id, week_start, week_end))
