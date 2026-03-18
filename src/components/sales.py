@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem,
-    QMessageBox, QInputDialog, QCheckBox
+    QMessageBox, QInputDialog, QCheckBox, QFrame, QGridLayout, QHeaderView,
+    QAbstractItemView, QScrollArea, QFormLayout
 )
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
@@ -19,48 +20,84 @@ class SalesWidget(QWidget):
         self.load_recent_sales()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        self.setStyleSheet("""
+            QWidget { background-color: #f5f6f8; color: #1f2937; font-size: 13px; }
+            QLabel#titleLabel { font-size: 24px; font-weight: 700; color: #1f4f82; }
+            QFrame#sectionCard { background: #ffffff; border: 1px solid #dbe1e7; border-radius: 10px; }
+            QLabel#sectionLabel { font-size: 15px; font-weight: 700; color: #1f2937; }
+            QLabel#hintLabel { color: #4b5563; }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                background: #ffffff;
+                border: 1px solid #cfd7df;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 30px;
+            }
+            QTableWidget { background: #ffffff; border: 1px solid #d7dde3; border-radius: 8px; }
+            QHeaderView::section {
+                background: #1f4f82;
+                color: #ffffff;
+                border: none;
+                border-right: 1px solid #174066;
+                border-bottom: 1px solid #174066;
+                padding: 8px;
+                font-weight: 600;
+            }
+        """)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        root_layout.addWidget(scroll)
+
+        container = QWidget()
+        scroll.setWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setSpacing(10)
+        layout.setContentsMargins(6, 6, 6, 6)
 
         title_label = QLabel("Sales & Billing")
-        title_label.setStyleSheet("font-size: 26px; font-weight: bold; color: #205087; margin-bottom: 7px;")
+        title_label.setObjectName("titleLabel")
         layout.addWidget(title_label)
 
-        clients_layout = QHBoxLayout()
-        clients_layout.setSpacing(10)
+        client_card, client_layout = self._create_section_card("Client")
+        client_row = QHBoxLayout()
+        client_row.setSpacing(8)
         self.client_search_input = QLineEdit()
         self.client_search_input.setPlaceholderText("Search client by name, phone, or company...")
         self.client_search_input.textChanged.connect(self.search_clients)
-        clients_layout.addWidget(self.client_search_input)
-
         self.client_combo = QComboBox()
-        self.client_combo.setMinimumWidth(300)
         self.client_combo.currentIndexChanged.connect(self.on_client_selected)
-        clients_layout.addWidget(self.client_combo)
-
-        layout.addLayout(clients_layout)
-
+        client_row.addWidget(self.client_search_input, 2)
+        client_row.addWidget(self.client_combo, 1)
+        client_layout.addLayout(client_row)
         self.client_info_label = QLabel("No client selected")
-        self.client_info_label.setStyleSheet("font-size: 14px; color: #555; margin-bottom:6px;")
-        layout.addWidget(self.client_info_label)
+        self.client_info_label.setObjectName("hintLabel")
+        self.client_info_label.setWordWrap(True)
+        client_layout.addWidget(self.client_info_label)
+        layout.addWidget(client_card)
 
-        # Product Line Entry (Easy UI with tax and discount per product)
-        product_layout = QHBoxLayout()
-        product_layout.setSpacing(10)
+        product_card, product_layout = self._create_section_card("Product Entry")
+        product_form = QFormLayout()
+        product_form.setLabelAlignment(Qt.AlignLeft)
+        product_form.setFormAlignment(Qt.AlignLeft)
+        product_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        product_form.setHorizontalSpacing(12)
+        product_form.setVerticalSpacing(8)
 
         self.gas_product_combo = QComboBox()
-        self.gas_product_combo.setMinimumWidth(220)
         self.gas_product_combo.currentIndexChanged.connect(self.on_product_selected)
-        product_layout.addWidget(QLabel("Product:"))
-        product_layout.addWidget(self.gas_product_combo)
+        product_form.addRow("Product:", self.gas_product_combo)
 
         self.quantity_spinbox = QSpinBox()
         self.quantity_spinbox.setRange(1, 1000)
         self.quantity_spinbox.setValue(1)
         self.quantity_spinbox.valueChanged.connect(self.calculate_totals)
-        product_layout.addWidget(QLabel("Qty:"))
-        product_layout.addWidget(self.quantity_spinbox)
+        product_form.addRow("Quantity:", self.quantity_spinbox)
 
         self.unit_price_spinbox = QDoubleSpinBox()
         self.unit_price_spinbox.setRange(0, 1000000)
@@ -68,8 +105,7 @@ class SalesWidget(QWidget):
         self.unit_price_spinbox.setPrefix("Rs. ")
         self.unit_price_spinbox.setSingleStep(100)
         self.unit_price_spinbox.valueChanged.connect(self.calculate_totals)
-        product_layout.addWidget(QLabel("Unit Price:"))
-        product_layout.addWidget(self.unit_price_spinbox)
+        product_form.addRow("Unit Price:", self.unit_price_spinbox)
 
         self.line_discount_spinbox = QDoubleSpinBox()
         self.line_discount_spinbox.setRange(0, 100000000)
@@ -77,8 +113,7 @@ class SalesWidget(QWidget):
         self.line_discount_spinbox.setPrefix("Rs. ")
         self.line_discount_spinbox.setSingleStep(50)
         self.line_discount_spinbox.valueChanged.connect(self.calculate_totals)
-        product_layout.addWidget(QLabel("Discount:"))
-        product_layout.addWidget(self.line_discount_spinbox)
+        product_form.addRow("Discount:", self.line_discount_spinbox)
 
         self.product_tax_spinbox = QDoubleSpinBox()
         self.product_tax_spinbox.setRange(0.0, 100.0)
@@ -86,174 +121,176 @@ class SalesWidget(QWidget):
         self.product_tax_spinbox.setSuffix(" %")
         self.product_tax_spinbox.setSingleStep(0.5)
         self.product_tax_spinbox.valueChanged.connect(self.calculate_totals)
-        product_layout.addWidget(QLabel("Tax rate:"))
-        product_layout.addWidget(self.product_tax_spinbox)
+        product_form.addRow("Tax Rate:", self.product_tax_spinbox)
+        product_layout.addLayout(product_form)
 
-        add_btn = QPushButton("Add to Cart")
-        add_btn.setStyleSheet(
-            "QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #218838; }"
-            "QPushButton:pressed { background-color: #1e7e34; }"
-        )
-        add_btn.setMinimumWidth(110)
-        add_btn.setFixedHeight(32)
-        add_btn.clicked.connect(self.add_to_cart)
-        product_layout.addWidget(add_btn)
-
-        clear_btn = QPushButton("Clear")
-        clear_btn.setStyleSheet(
-            "QPushButton { background-color: #6c757d; color: white; border: 1px solid #5a6268; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #5a6268; }"
-            "QPushButton:pressed { background-color: #545b62; }"
-        )
-        clear_btn.setMinimumWidth(96)
-        clear_btn.setFixedHeight(32)
-        clear_btn.clicked.connect(self.clear_form)
-        product_layout.addWidget(clear_btn)
-
-        layout.addLayout(product_layout)
-
-        # Totals for the current line (product about-to-add)
-        totals_layout = QHBoxLayout()
-        totals_layout.setSpacing(12)
+        line_totals = QHBoxLayout()
+        line_totals.setSpacing(10)
         self.subtotal_label = QLabel("Rs. 0.00")
         self.tax_label = QLabel("Rs. 0.00")
         self.total_label = QLabel("Rs. 0.00")
-        self.subtotal_label.setStyleSheet("font-weight: bold;")
-        self.tax_label.setStyleSheet("font-weight: bold;")
-        self.total_label.setStyleSheet("font-weight: bold;")
-        totals_layout.addWidget(QLabel("Line Subtotal:"))
-        totals_layout.addWidget(self.subtotal_label)
-        totals_layout.addWidget(QLabel("Tax:"))
-        totals_layout.addWidget(self.tax_label)
-        totals_layout.addWidget(QLabel("Line Total:"))
-        totals_layout.addWidget(self.total_label)
-        layout.addLayout(totals_layout)
+        self.subtotal_label.setStyleSheet("font-weight: 700;")
+        self.tax_label.setStyleSheet("font-weight: 700;")
+        self.total_label.setStyleSheet("font-weight: 700;")
+        line_totals.addWidget(QLabel("Line Subtotal:"))
+        line_totals.addWidget(self.subtotal_label)
+        line_totals.addSpacing(8)
+        line_totals.addWidget(QLabel("Tax:"))
+        line_totals.addWidget(self.tax_label)
+        line_totals.addSpacing(8)
+        line_totals.addWidget(QLabel("Line Total:"))
+        line_totals.addWidget(self.total_label)
+        line_totals.addStretch(1)
+        product_layout.addLayout(line_totals)
 
+        product_buttons = QHBoxLayout()
+        product_buttons.setSpacing(8)
+        add_btn = self._create_action_button("Add to Cart", "success")
+        add_btn.clicked.connect(self.add_to_cart)
+        clear_btn = self._create_action_button("Clear", "secondary")
+        clear_btn.clicked.connect(self.clear_form)
+        product_buttons.addStretch(1)
+        product_buttons.addWidget(add_btn)
+        product_buttons.addWidget(clear_btn)
+        product_layout.addLayout(product_buttons)
+        layout.addWidget(product_card)
+
+        cart_card, cart_layout = self._create_section_card("Cart")
         self.cart_table = QTableWidget()
         self.cart_table.setColumnCount(8)
         self.cart_table.setHorizontalHeaderLabels([
             "Products", "Quantity", "Unit Price", "Discount", "Tax (%)", "Subtotal", "Tax", "Total"
         ])
-        self.cart_table.setAlternatingRowColors(True)
-        self.cart_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.cart_table)
+        self._setup_table(self.cart_table, min_height=170)
+        cart_layout.addWidget(self.cart_table)
 
-        cart_actions = QHBoxLayout()
-        remove_btn = QPushButton("Remove Selected")
-        remove_btn.setStyleSheet(
-            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #c82333; }"
-            "QPushButton:pressed { background-color: #bd2130; }"
-        )
-        remove_btn.setMinimumWidth(140)
-        remove_btn.setFixedHeight(32)
+        cart_buttons = QHBoxLayout()
+        cart_buttons.setSpacing(8)
+        remove_btn = self._create_action_button("Remove Selected", "danger")
         remove_btn.clicked.connect(self.remove_from_cart)
-        clear_cart_btn = QPushButton("Clear Cart")
-        clear_cart_btn.setStyleSheet(
-            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #c82333; }"
-            "QPushButton:pressed { background-color: #bd2130; }"
-        )
-        clear_cart_btn.setMinimumWidth(110)
-        clear_cart_btn.setFixedHeight(32)
+        clear_cart_btn = self._create_action_button("Clear Cart", "danger")
         clear_cart_btn.clicked.connect(self.clear_cart)
-        clear_all_btn = QPushButton("Cancel Sale / Clear All")
-        clear_all_btn.setStyleSheet(
-            "QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #c82333; }"
-            "QPushButton:pressed { background-color: #bd2130; }"
-        )
-        clear_all_btn.setMinimumWidth(180)
-        clear_all_btn.setFixedHeight(32)
+        clear_all_btn = self._create_action_button("Cancel Sale / Clear All", "danger")
         clear_all_btn.clicked.connect(self.clear_all_sale)
-        cart_actions.addWidget(remove_btn)
-        cart_actions.addWidget(clear_cart_btn)
-        cart_actions.addWidget(clear_all_btn)
-        layout.addLayout(cart_actions)
+        cart_buttons.addWidget(remove_btn)
+        cart_buttons.addWidget(clear_cart_btn)
+        cart_buttons.addWidget(clear_all_btn)
+        cart_buttons.addStretch(1)
+        cart_layout.addLayout(cart_buttons)
+        layout.addWidget(cart_card)
 
-        payment_layout = QHBoxLayout()
-        payment_layout.setSpacing(18)
+        payment_card, payment_layout = self._create_section_card("Payment")
+        payment_form = QFormLayout()
+        payment_form.setLabelAlignment(Qt.AlignLeft)
+        payment_form.setFormAlignment(Qt.AlignLeft)
+        payment_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        payment_form.setHorizontalSpacing(12)
+        payment_form.setVerticalSpacing(8)
+
         self.cart_total_label = QLabel("Rs. 0.00")
         self.cart_tax_label = QLabel("Rs. 0.00")
+        self.balance_label = QLabel("Rs. 0.00")
+        self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
+
         self.overall_discount_spinbox = QDoubleSpinBox()
         self.overall_discount_spinbox.setRange(0, 100000000)
         self.overall_discount_spinbox.setDecimals(2)
         self.overall_discount_spinbox.setPrefix("Rs. ")
         self.overall_discount_spinbox.valueChanged.connect(self.calculate_balance)
-        self.overall_discount_spinbox.setFixedWidth(110)
+
         self.amount_paid_spinbox = QDoubleSpinBox()
         self.amount_paid_spinbox.setRange(0, 100000000)
         self.amount_paid_spinbox.setDecimals(2)
         self.amount_paid_spinbox.setPrefix("Rs. ")
         self.amount_paid_spinbox.valueChanged.connect(self.calculate_balance)
-        self.amount_paid_spinbox.setFixedWidth(110)
-        self.balance_label = QLabel("Rs. 0.00")
-        self.balance_label.setStyleSheet("font-weight: bold; color: #27ae60;")
-        lbl_cart_total = QLabel("Cart Total:")
-        lbl_cart_tax = QLabel("Cart Tax:")
-        lbl_overall_disc = QLabel("Overall Disc:")
-        lbl_amount_paid = QLabel("Amount Paid:")
-        lbl_balance = QLabel("Balance:")
-        for lbl in (lbl_cart_total, lbl_cart_tax, lbl_overall_disc, lbl_amount_paid, lbl_balance):
-            lbl.setStyleSheet("padding-right:6px;")
-        payment_layout.addWidget(lbl_cart_total)
-        payment_layout.addWidget(self.cart_total_label)
-        payment_layout.addSpacing(12)
-        payment_layout.addWidget(lbl_cart_tax)
-        payment_layout.addWidget(self.cart_tax_label)
-        payment_layout.addSpacing(12)
-        payment_layout.addWidget(lbl_overall_disc)
-        payment_layout.addWidget(self.overall_discount_spinbox)
-        payment_layout.addSpacing(12)
-        payment_layout.addWidget(lbl_amount_paid)
-        payment_layout.addWidget(self.amount_paid_spinbox)
-        payment_layout.addSpacing(12)
-        payment_layout.addWidget(lbl_balance)
-        self.balance_label.setFixedWidth(80)
-        payment_layout.addWidget(self.balance_label)
-        full_pay_btn = QPushButton("Full")
-        full_pay_btn.setStyleSheet(
-            "QPushButton { background-color: #007bff; color: white; border: 1px solid #0069d9; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #0069d9; }"
-            "QPushButton:pressed { background-color: #005cbf; }"
-        )
-        full_pay_btn.setMinimumWidth(80)
-        full_pay_btn.setFixedHeight(32)
-        full_pay_btn.clicked.connect(self.set_full_payment)
-        clear_pay_btn = QPushButton("Clear")
-        clear_pay_btn.setStyleSheet(
-            "QPushButton { background-color: #6c757d; color: white; border: 1px solid #5a6268; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #5a6268; }"
-            "QPushButton:pressed { background-color: #545b62; }"
-        )
-        clear_pay_btn.setMinimumWidth(80)
-        clear_pay_btn.setFixedHeight(32)
-        clear_pay_btn.clicked.connect(self.clear_payment)
-        complete_btn = QPushButton("Confirm")
-        complete_btn.setStyleSheet(
-            "QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; }"
-            "QPushButton:hover { background-color: #218838; }"
-            "QPushButton:pressed { background-color: #1e7e34; }"
-        )
-        complete_btn.setMinimumWidth(110)
-        complete_btn.setFixedHeight(32)
-        complete_btn.clicked.connect(self.complete_sale)
-        payment_layout.addStretch(1)
-        payment_layout.addWidget(full_pay_btn)
-        payment_layout.addWidget(clear_pay_btn)
-        payment_layout.addWidget(complete_btn)
-        layout.addLayout(payment_layout)
 
+        payment_form.addRow("Cart Total:", self.cart_total_label)
+        payment_form.addRow("Cart Tax:", self.cart_tax_label)
+        payment_form.addRow("Overall Discount:", self.overall_discount_spinbox)
+        payment_form.addRow("Amount Paid:", self.amount_paid_spinbox)
+        payment_form.addRow("Balance:", self.balance_label)
+        payment_layout.addLayout(payment_form)
+
+        payment_buttons = QHBoxLayout()
+        payment_buttons.setSpacing(8)
+        payment_buttons.addStretch(1)
+        full_pay_btn = self._create_action_button("Full", "primary")
+        full_pay_btn.clicked.connect(self.set_full_payment)
+        clear_pay_btn = self._create_action_button("Clear", "secondary")
+        clear_pay_btn.clicked.connect(self.clear_payment)
+        complete_btn = self._create_action_button("Confirm", "success")
+        complete_btn.clicked.connect(self.complete_sale)
+        payment_buttons.addWidget(full_pay_btn)
+        payment_buttons.addWidget(clear_pay_btn)
+        payment_buttons.addWidget(complete_btn)
+        payment_layout.addLayout(payment_buttons)
+        layout.addWidget(payment_card)
+
+        recent_card, recent_layout = self._create_section_card("Recent Sales")
         self.recent_sales_table = QTableWidget()
         self.recent_sales_table.setColumnCount(8)
         self.recent_sales_table.setHorizontalHeaderLabels([
             "Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Actions"
         ])
-        self.recent_sales_table.setAlternatingRowColors(True)
-        self.recent_sales_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.recent_sales_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.recent_sales_table)
+        self._setup_table(self.recent_sales_table, min_height=170)
+        self.recent_sales_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        self.recent_sales_table.setColumnWidth(7, 150)
+        recent_layout.addWidget(self.recent_sales_table)
+        layout.addWidget(recent_card)
+
+    def _create_section_card(self, title: str):
+        card = QFrame()
+        card.setObjectName("sectionCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 12, 12, 12)
+        card_layout.setSpacing(10)
+
+        heading = QLabel(title)
+        heading.setObjectName("sectionLabel")
+        card_layout.addWidget(heading)
+        return card, card_layout
+
+    def _create_action_button(self, text: str, kind: str = "secondary"):
+        button = QPushButton(text)
+        button.setMinimumHeight(34)
+
+        styles = {
+            "primary": (
+                "QPushButton { background-color: #1a73e8; color: white; border: 1px solid #125bc4; border-radius: 6px; padding: 6px 12px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #1765cb; }"
+                "QPushButton:pressed { background-color: #125bc4; }"
+            ),
+            "success": (
+                "QPushButton { background-color: #28a745; color: white; border: 1px solid #1f8a3a; border-radius: 6px; padding: 6px 12px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #228d3d; }"
+                "QPushButton:pressed { background-color: #1f8a3a; }"
+            ),
+            "danger": (
+                "QPushButton { background-color: #dc3545; color: white; border: 1px solid #b52a37; border-radius: 6px; padding: 6px 12px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #c22f3d; }"
+                "QPushButton:pressed { background-color: #b52a37; }"
+            ),
+            "secondary": (
+                "QPushButton { background-color: #6c757d; color: white; border: 1px solid #596168; border-radius: 6px; padding: 6px 12px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #5e666d; }"
+                "QPushButton:pressed { background-color: #535a61; }"
+            ),
+        }
+        button.setStyleSheet(styles.get(kind, styles["secondary"]))
+        return button
+
+    def _setup_table(self, table: QTableWidget, min_height: int = 160):
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setWordWrap(True)
+        table.setMinimumHeight(min_height)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.horizontalHeader().setMinimumSectionSize(90)
+        table.verticalHeader().setDefaultSectionSize(34)
 
     def search_clients(self):
         search_text = self.client_search_input.text().strip()
@@ -620,9 +657,17 @@ class SalesWidget(QWidget):
                         self.recent_sales_table.item(row, 6).setForeground(Qt.darkGreen)
 
                     generate_btn = QPushButton("Generate Receipt")
+                    generate_btn.setMinimumHeight(30)
+                    generate_btn.setMinimumWidth(130)
+                    generate_btn.setFocusPolicy(Qt.NoFocus)
+                    generate_btn.setStyleSheet(
+                        "QPushButton { background-color: #1a73e8; color: white; border: 1px solid #125bc4; border-radius: 6px; padding: 6px 10px; font-weight: 600; }"
+                        "QPushButton:hover { background-color: #1765cb; }"
+                        "QPushButton:pressed { background-color: #125bc4; }"
+                        "QPushButton:focus { outline: none; }"
+                    )
                     generate_btn.clicked.connect(lambda checked, s=sale: self.generate_receipt_for_sale(s))
                     self.recent_sales_table.setCellWidget(row, 7, generate_btn)
-            self.recent_sales_table.resizeColumnsToContents()
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load recent sales: {str(e)}")
 

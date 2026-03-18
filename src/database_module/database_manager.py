@@ -416,7 +416,9 @@ class DatabaseManager:
         if search_term:
             query = '''
                 SELECT * FROM clients 
-                WHERE name LIKE ? OR phone LIKE ? OR company LIKE ?
+                WHERE LOWER(COALESCE(name, '')) LIKE LOWER(?)
+                   OR LOWER(COALESCE(phone, '')) LIKE LOWER(?)
+                   OR LOWER(COALESCE(company, '')) LIKE LOWER(?)
                 ORDER BY name
             '''
             search_pattern = f"%{search_term}%"
