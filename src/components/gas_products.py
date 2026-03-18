@@ -207,7 +207,7 @@ class GasProductsWidget(QWidget):
         self.products_table.setColumnWidth(3, 100)  # Capacity
         self.products_table.setColumnWidth(4, 100)  # Unit Price
         self.products_table.setColumnWidth(5, 260)  # Description
-        self.products_table.setColumnWidth(6, 240)  # Actions
+        self.products_table.setColumnWidth(6, 180)  # Actions
         
         layout.addWidget(self.products_table)
         
@@ -256,9 +256,11 @@ class GasProductsWidget(QWidget):
             
             # Actions
             actions_widget = QWidget()
+            actions_widget.setMinimumHeight(32)
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setSpacing(6)
-            actions_layout.setContentsMargins(8, 4, 8, 4)
+            actions_layout.setSpacing(4)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setAlignment(Qt.AlignCenter)
             
             edit_btn = QPushButton("Edit")
             edit_btn.setStyleSheet("""
@@ -266,16 +268,17 @@ class GasProductsWidget(QWidget):
                     background-color: #28a745;
                     color: white;
                     border: 1px solid #1e7e34;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    font-size: 13px;
+                    border-radius: 5px;
+                    padding: 3px 8px;
+                    font-size: 11px;
                     font-weight: 600;
                 }
                 QPushButton:hover { background-color: #218838; }
                 QPushButton:pressed { background-color: #1e7e34; }
             """)
-            edit_btn.setMinimumWidth(96)
-            edit_btn.setFixedHeight(32)
+            edit_btn.setMinimumWidth(62)
+            edit_btn.setFixedHeight(24)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
             edit_btn.clicked.connect(lambda checked, p=product: self.edit_product(p))
             actions_layout.addWidget(edit_btn)
             
@@ -286,23 +289,22 @@ class GasProductsWidget(QWidget):
                         background-color: #dc3545;
                         color: white;
                         border: 1px solid #bd2130;
-                        border-radius: 6px;
-                        padding: 6px 12px;
-                        font-size: 13px;
+                        border-radius: 5px;
+                        padding: 3px 8px;
+                        font-size: 11px;
                         font-weight: 600;
                     }
                     QPushButton:hover { background-color: #c82333; }
                     QPushButton:pressed { background-color: #bd2130; }
                 """)
-                delete_btn.setMinimumWidth(96)
-                delete_btn.setFixedHeight(32)
+                delete_btn.setMinimumWidth(62)
+                delete_btn.setFixedHeight(24)
+                delete_btn.setFocusPolicy(Qt.NoFocus)
                 delete_btn.clicked.connect(lambda checked, p=product: self.delete_product(p))
                 actions_layout.addWidget(delete_btn)
-
-            actions_layout.addStretch()
             
             self.products_table.setCellWidget(row, 6, actions_widget)
-            self.products_table.setRowHeight(row, 44)
+            self.products_table.setRowHeight(row, 40)
     
     def filter_products(self):
         """Filter products based on search input"""

@@ -319,7 +319,7 @@ class ClientsWidget(QWidget):
         self.clients_table.setColumnWidth(4, 120)  # Total Purchases
         self.clients_table.setColumnWidth(5, 120)  # Total Paid
         self.clients_table.setColumnWidth(6, 100)  # Balance
-        self.clients_table.setColumnWidth(7, 280)  # Actions
+        self.clients_table.setColumnWidth(7, 250)  # Actions
         
         layout.addWidget(self.clients_table)
         
@@ -368,14 +368,18 @@ class ClientsWidget(QWidget):
                 self.clients_table.setItem(row, 6, balance_item)
             
                 actions_widget = QWidget()
+                actions_widget.setMinimumHeight(32)
                 actions_layout = QHBoxLayout(actions_widget)
-                actions_layout.setSpacing(6)
-                actions_layout.setContentsMargins(8, 4, 8, 4)
+                actions_layout.setSpacing(4)
+                actions_layout.setContentsMargins(2, 2, 2, 2)
+                actions_layout.setAlignment(Qt.AlignCenter)
 
                 view_btn = QPushButton("View")
-                view_btn.setMinimumWidth(72)
+                view_btn.setMinimumWidth(62)
+                view_btn.setFixedHeight(24)
+                view_btn.setFocusPolicy(Qt.NoFocus)
                 view_btn.setStyleSheet("""
-                    QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                    QPushButton { background-color: #17a2b8; color: white; border: 1px solid #138496; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
                     QPushButton:hover { background-color: #138496; }
                     QPushButton:pressed { background-color: #117a8b; }
                 """)
@@ -383,9 +387,11 @@ class ClientsWidget(QWidget):
                 actions_layout.addWidget(view_btn)
             
                 edit_btn = QPushButton("Edit")
-                edit_btn.setMinimumWidth(72)
+                edit_btn.setMinimumWidth(62)
+                edit_btn.setFixedHeight(24)
+                edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.setStyleSheet("""
-                    QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                    QPushButton { background-color: #28a745; color: white; border: 1px solid #1e7e34; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
                     QPushButton:hover { background-color: #218838; }
                     QPushButton:pressed { background-color: #1e7e34; }
                 """)
@@ -394,19 +400,19 @@ class ClientsWidget(QWidget):
             
                 if self.current_user['role'] == 'Admin':
                     delete_btn = QPushButton("Delete")
-                    delete_btn.setMinimumWidth(72)
+                    delete_btn.setMinimumWidth(62)
+                    delete_btn.setFixedHeight(24)
+                    delete_btn.setFocusPolicy(Qt.NoFocus)
                     delete_btn.setStyleSheet("""
-                        QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+                        QPushButton { background-color: #dc3545; color: white; border: 1px solid #bd2130; border-radius: 5px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
                         QPushButton:hover { background-color: #c82333; }
                         QPushButton:pressed { background-color: #bd2130; }
                     """)
                     delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
                     actions_layout.addWidget(delete_btn)
 
-                actions_layout.addStretch()
-
                 self.clients_table.setCellWidget(row, 7, actions_widget)
-                self.clients_table.setRowHeight(row, 44)
+                self.clients_table.setRowHeight(row, 40)
     
     def filter_clients(self):
         """Filter clients based on search input"""
