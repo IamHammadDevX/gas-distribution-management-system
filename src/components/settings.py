@@ -18,12 +18,87 @@ class SettingsWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Title
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self.setStyleSheet("""
+            QLabel { color: #1e293b; }
+            QGroupBox {
+                border: 1px solid #dbe4f0;
+                border-radius: 10px;
+                margin-top: 8px;
+                background: #ffffff;
+                font-weight: 700;
+                color: #1e3a8a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QLineEdit, QComboBox {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 5px 8px;
+                min-height: 30px;
+                background: #ffffff;
+            }
+            QLineEdit:focus, QComboBox:focus { border: 1px solid #2563eb; }
+            QPushButton {
+                background-color: #2563eb;
+                color: white;
+                border: 1px solid #1d4ed8;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 28px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #1d4ed8; }
+            QTabWidget::pane {
+                border: 1px solid #dbe4f0;
+                background: #ffffff;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                padding: 7px 12px;
+                background: #eff6ff;
+                border: 1px solid #dbeafe;
+                border-bottom: none;
+                margin-right: 4px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                color: #1e3a8a;
+                font-weight: 600;
+            }
+            QTabBar::tab:selected {
+                background: #2563eb;
+                color: white;
+            }
+            QTableWidget {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background: #ffffff;
+                gridline-color: #e5e7eb;
+            }
+            QTableWidget::item:selected { background-color: #e6f0ff; color: #0f172a; }
+            QHeaderView::section {
+                background-color: #2563eb;
+                color: white;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }
+            QTextEdit {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background-color: #f8fbff;
+                font-family: Consolas;
+                font-size: 11px;
+            }
+        """)
+
         title_label = QLabel("Settings")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 700; color: #1e3a8a;")
         layout.addWidget(title_label)
         
         # Check if user is admin
@@ -67,6 +142,18 @@ class SettingsWidget(QWidget):
         password_layout.addRow("Confirm Password:", self.confirm_password_input)
         
         change_password_btn = QPushButton("Change Password")
+        change_password_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #16a34a;
+                color: white;
+                border: 1px solid #15803d;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 28px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #15803d; }
+        """)
         change_password_btn.clicked.connect(self.change_password)
         password_layout.addRow(change_password_btn)
         
@@ -176,7 +263,9 @@ class SettingsWidget(QWidget):
         self.users_table.setAlternatingRowColors(True)
         self.users_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.users_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.users_table.horizontalHeader().setStretchLastSection(True)
+        self.users_table.verticalHeader().setVisible(False)
+        self.users_table.verticalHeader().setDefaultSectionSize(34)
+        self.users_table.setFocusPolicy(Qt.NoFocus)
         
         users_layout.addWidget(self.users_table)
         
@@ -236,7 +325,9 @@ class SettingsWidget(QWidget):
         self.backup_table.setAlternatingRowColors(True)
         self.backup_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.backup_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.backup_table.horizontalHeader().setStretchLastSection(True)
+        self.backup_table.verticalHeader().setVisible(False)
+        self.backup_table.verticalHeader().setDefaultSectionSize(34)
+        self.backup_table.setFocusPolicy(Qt.NoFocus)
         
         backup_history_layout.addWidget(self.backup_table)
         
@@ -391,6 +482,12 @@ class SettingsWidget(QWidget):
                     self.users_table.setItem(row, 4, QTableWidgetItem('Active' if user['is_active'] else 'Inactive'))
             
             self.users_table.resizeColumnsToContents()
+            users_header = self.users_table.horizontalHeader()
+            users_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            users_header.setSectionResizeMode(1, QHeaderView.Stretch)
+            users_header.setSectionResizeMode(2, QHeaderView.Stretch)
+            users_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            users_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
             
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load users: {str(e)}")
@@ -512,10 +609,32 @@ class SettingsWidget(QWidget):
                     self.backup_table.setItem(row, 2, QTableWidgetItem(f"{size_mb:.2f}"))
 
                     restore_btn = QPushButton("Restore")
+                    restore_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #0ea5e9;
+                            color: white;
+                            border: 1px solid #0284c7;
+                            border-radius: 6px;
+                            padding: 2px 8px;
+                            min-height: 24px;
+                            max-height: 24px;
+                            min-width: 62px;
+                            max-width: 72px;
+                            font-size: 11px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover { background-color: #0284c7; }
+                    """)
+                    restore_btn.setFocusPolicy(Qt.NoFocus)
                     restore_btn.clicked.connect(lambda checked, path=backup['backup_path']: self.restore_specific_backup(path))
                     self.backup_table.setCellWidget(row, 3, restore_btn)
             
-            self.backup_table.resizeColumnsToContents()
+            backup_header = self.backup_table.horizontalHeader()
+            backup_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            backup_header.setSectionResizeMode(1, QHeaderView.Stretch)
+            backup_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            backup_header.setSectionResizeMode(3, QHeaderView.Fixed)
+            self.backup_table.setColumnWidth(3, 88)
             
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load backup history: {str(e)}")

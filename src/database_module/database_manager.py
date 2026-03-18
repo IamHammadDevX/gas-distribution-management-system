@@ -1,5 +1,7 @@
 import os
 import re
+import time as pytime
+import random
 from contextlib import contextmanager
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Any
@@ -26,6 +28,10 @@ class DatabaseManager:
 
         self.dsn = dsn or self._default_dsn()
         self.app_timezone = os.environ.get("APP_TIMEZONE", "Asia/Karachi")
+        self.statement_timeout_ms = int(os.environ.get("PG_STATEMENT_TIMEOUT_MS", "30000"))
+        self.lock_timeout_ms = int(os.environ.get("PG_LOCK_TIMEOUT_MS", "10000"))
+        self.query_retries = max(0, int(os.environ.get("PG_QUERY_RETRIES", "2")))
+        self.retry_backoff_ms = max(10, int(os.environ.get("PG_RETRY_BACKOFF_MS", "120")))
 
         self.pool = None
         if ConnectionPool is not None:
@@ -75,7 +81,26 @@ class DatabaseManager:
             cur.execute("SELECT set_config('TimeZone', %s, false)", (self.app_timezone,))
             # Make committed transactions durable on server crash (WAL).
             cur.execute("SET synchronous_commit TO on")
+            cur.execute("SELECT set_config('statement_timeout', %s, false)", (f"{self.statement_timeout_ms}ms",))
+            cur.execute("SELECT set_config('lock_timeout', %s, false)", (f"{self.lock_timeout_ms}ms",))
+            cur.execute("SET idle_in_transaction_session_timeout TO '60000ms'")
         conn.commit()
+
+    def _is_retryable_query_error(self, exc: Exception) -> bool:
+        sqlstate = getattr(exc, "sqlstate", None)
+        if sqlstate:
+            if sqlstate.startswith("08"):
+                return True
+            if sqlstate in {"40001", "40P01", "53300", "57P01"}:
+                return True
+        if psycopg is not None:
+            return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+        return False
+
+    @staticmethod
+    def _is_retryable_write_error(exc: Exception) -> bool:
+        sqlstate = getattr(exc, "sqlstate", None)
+        return sqlstate in {"40001", "40P01"}
 
     @contextmanager
     def _connection(self):
@@ -296,6 +321,20 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name)",
             "CREATE INDEX IF NOT EXISTS idx_clients_company ON clients (company)",
             "CREATE INDEX IF NOT EXISTS idx_client_initial_outstanding_client ON client_initial_outstanding (client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_client_created_at ON sales (client_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_gas_product_id ON sales (gas_product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales (created_by)",
+            "CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items (sale_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sale_items_gas_product_id ON sale_items (gas_product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_receipts_sale_id ON receipts (sale_id)",
+            "CREATE INDEX IF NOT EXISTS idx_receipts_client_id ON receipts (client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_cylinder_returns_client_created ON cylinder_returns (client_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_cylinder_returns_client_product ON cylinder_returns (client_id, gas_type, sub_type, capacity)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_created_at ON weekly_invoices (created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_receipt_number ON weekly_invoices (receipt_number)",
+            "CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1 INCREMENT BY 1",
+            "CREATE SEQUENCE IF NOT EXISTS weekly_invoice_number_seq START WITH 1 INCREMENT BY 1",
+            "CREATE SEQUENCE IF NOT EXISTS weekly_receipt_number_seq START WITH 1 INCREMENT BY 1",
         ]
 
         with self._connection() as conn:
@@ -322,22 +361,30 @@ class DatabaseManager:
     
     def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
         sql = self._translate_sql(query)
-        with self._connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(sql, params)
-                rows = list(cur.fetchall())
-                normalized: List[Dict] = []
-                for row in rows:
-                    item = dict(row)
-                    for key, value in list(item.items()):
-                        if isinstance(value, datetime):
-                            item[key] = value.strftime("%Y-%m-%d %H:%M:%S")
-                        elif isinstance(value, date):
-                            item[key] = value.isoformat()
-                        elif isinstance(value, time):
-                            item[key] = value.strftime("%H:%M:%S")
-                    normalized.append(item)
-                return normalized
+        retries = self.query_retries
+        for attempt in range(retries + 1):
+            try:
+                with self._connection() as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(sql, params)
+                        rows = list(cur.fetchall())
+                        normalized: List[Dict] = []
+                        for row in rows:
+                            item = dict(row)
+                            for key, value in list(item.items()):
+                                if isinstance(value, datetime):
+                                    item[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+                                elif isinstance(value, date):
+                                    item[key] = value.isoformat()
+                                elif isinstance(value, time):
+                                    item[key] = value.strftime("%H:%M:%S")
+                            normalized.append(item)
+                        return normalized
+            except Exception as exc:
+                if attempt >= retries or not self._is_retryable_query_error(exc):
+                    raise
+                sleep_ms = self.retry_backoff_ms * (2 ** attempt) + random.randint(0, 50)
+                pytime.sleep(sleep_ms / 1000.0)
     
     def execute_update(self, query: str, params: tuple = ()) -> int:
         sql = self._translate_sql(query).strip()
@@ -345,14 +392,22 @@ class DatabaseManager:
         if is_insert:
             sql = f"{sql} RETURNING id"
 
-        with self._connection() as conn:
-            with conn.transaction():
-                with conn.cursor(row_factory=dict_row) as cur:
-                    cur.execute(sql, params)
-                    if is_insert:
-                        row = cur.fetchone()
-                        return int(row["id"]) if row and "id" in row else 0
-                    return int(cur.rowcount or 0)
+        retries = self.query_retries
+        for attempt in range(retries + 1):
+            try:
+                with self._connection() as conn:
+                    with conn.transaction():
+                        with conn.cursor(row_factory=dict_row) as cur:
+                            cur.execute(sql, params)
+                            if is_insert:
+                                row = cur.fetchone()
+                                return int(row["id"]) if row and "id" in row else 0
+                            return int(cur.rowcount or 0)
+            except Exception as exc:
+                if attempt >= retries or not self._is_retryable_write_error(exc):
+                    raise
+                sleep_ms = self.retry_backoff_ms * (2 ** attempt) + random.randint(0, 50)
+                pytime.sleep(sleep_ms / 1000.0)
 
     @contextmanager
     def transaction(self):
@@ -487,18 +542,18 @@ class DatabaseManager:
         return self.execute_update(query, (receipt_number, sale_id, client_id, total_amount, amount_paid, balance, created_by))
     
     def get_next_receipt_number(self) -> str:
-        query = 'SELECT COUNT(*) + 1 AS n FROM receipts'
+        query = "SELECT nextval('receipt_number_seq') AS n"
         result = self.execute_query(query)
         count = int(result[0]['n']) if result else 1
         return f"RCP-{datetime.now().year}-{str(count).zfill(6)}"
 
     def get_next_weekly_invoice_number(self) -> str:
-        rows = self.execute_query('SELECT COUNT(*) + 1 AS n FROM weekly_invoices')
+        rows = self.execute_query("SELECT nextval('weekly_invoice_number_seq') AS n")
         n = rows[0]['n'] if rows else 1
         return f"WEEK-{datetime.now().year}-{str(n).zfill(6)}"
 
     def get_next_weekly_receipt_number(self) -> str:
-        rows = self.execute_query('SELECT COUNT(*) + 1 AS n FROM weekly_invoices WHERE receipt_number IS NOT NULL')
+        rows = self.execute_query("SELECT nextval('weekly_receipt_number_seq') AS n")
         n = rows[0]['n'] if rows else 1
         return f"WRCP-{datetime.now().year}-{str(n).zfill(6)}"
 
@@ -621,7 +676,9 @@ class DatabaseManager:
                 COALESCE(SUM(si.total_amount),0) AS items_total
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.id
-            WHERE s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+            WHERE s.client_id = ?
+              AND s.created_at >= (?::date)
+              AND s.created_at < (?::date + INTERVAL '1 day')
         ''', params)
         sales_rows = self.execute_query('''
             SELECT 
@@ -631,7 +688,9 @@ class DatabaseManager:
                 COALESCE(SUM(s.tax_amount),0) AS tax_amount,
                 COALESCE(SUM(s.total_amount),0) AS total_payable
             FROM sales s
-            WHERE s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+            WHERE s.client_id = ?
+              AND s.created_at >= (?::date)
+              AND s.created_at < (?::date + INTERVAL '1 day')
         ''', params)
         items_has_data = bool(items_rows and (items_rows[0]['total_cylinders'] or items_rows[0]['subtotal'] or items_rows[0]['items_total']))
         total_cylinders = int(items_rows[0]['total_cylinders']) if items_has_data else (int(sales_rows[0]['total_cylinders']) if sales_rows else 0)
@@ -643,7 +702,7 @@ class DatabaseManager:
         prev_rows = self.execute_query('''
             SELECT COALESCE(SUM(balance),0) AS prev_balance
             FROM sales
-            WHERE client_id = ? AND DATE(created_at, 'localtime') < ?
+            WHERE client_id = ? AND created_at < (?::date)
         ''', (client_id, week_start))
         init_rows = self.execute_query('SELECT COALESCE(initial_previous_balance,0) AS init_prev FROM clients WHERE id = ?', (client_id,))
         init_prev = float(init_rows[0]['init_prev']) if init_rows else 0.0
@@ -818,7 +877,7 @@ class DatabaseManager:
     def get_client_weekly_items(self, client_id: int, week_start: str, week_end: str) -> List[Dict]:
         return self.execute_query('''
             SELECT * FROM (
-                SELECT DATE(s.created_at, 'localtime') AS date, 
+                SELECT DATE(s.created_at) AS date, 
                        COALESCE(gp.gas_type,'') AS gas_type,
                        COALESCE(gp.sub_type,'') AS sub_type,
                        COALESCE(gp.capacity,'') AS capacity,
@@ -830,9 +889,11 @@ class DatabaseManager:
                 FROM sale_items si
                 JOIN sales s ON si.sale_id = s.id
                 JOIN gas_products gp ON si.gas_product_id = gp.id
-                WHERE s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+                                WHERE s.client_id = ?
+                                    AND s.created_at >= (?::date)
+                                    AND s.created_at < (?::date + INTERVAL '1 day')
                 UNION ALL
-                SELECT DATE(s.created_at, 'localtime') AS date,
+                                SELECT DATE(s.created_at) AS date,
                        COALESCE(gp.gas_type,'') AS gas_type,
                        COALESCE(gp.sub_type,'') AS sub_type,
                        COALESCE(gp.capacity,'') AS capacity,
@@ -844,7 +905,10 @@ class DatabaseManager:
                 FROM sales s
                 LEFT JOIN sale_items si_chk ON si_chk.sale_id = s.id
                 JOIN gas_products gp ON s.gas_product_id = gp.id
-                WHERE si_chk.id IS NULL AND s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+                                WHERE si_chk.id IS NULL
+                                    AND s.client_id = ?
+                                    AND s.created_at >= (?::date)
+                                    AND s.created_at < (?::date + INTERVAL '1 day')
             )
             ORDER BY date ASC
         ''', (client_id, week_start, week_end, client_id, week_start, week_end))
@@ -943,12 +1007,11 @@ class DatabaseManager:
             FROM sales s
             JOIN clients c ON s.client_id = c.id
             JOIN users u ON s.created_by = u.id
-            WHERE DATE(s.created_at, 'localtime') = ?
+            WHERE s.created_at >= (?::date)
+              AND s.created_at < (?::date + INTERVAL '1 day')
             ORDER BY s.created_at DESC
         '''
-        return self.execute_query(query, (day,))
-    
-    pass
+        return self.execute_query(query, (day, day))
 
     def get_return_rows_for_client_product(self, client_id: int, gas_type: str, capacity: str) -> List[Dict]:
         return self.execute_query(
@@ -1046,7 +1109,8 @@ class DatabaseManager:
                    ) AS quantities_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
-            WHERE DATE(s.created_at) BETWEEN ? AND ?
+                        WHERE s.created_at >= (?::date)
+                            AND s.created_at < (?::date + INTERVAL '1 day')
             ORDER BY s.created_at DESC
         '''
         return self.execute_query(query, (start_date, end_date))
@@ -1179,7 +1243,13 @@ class DatabaseManager:
         init_total = int(init_total_rows[0]['total']) if init_total_rows else 0
         delivered_items_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM sale_items')
         delivered_items_total = int(delivered_items_rows[0]['total']) if delivered_items_rows else 0
-        delivered_sales_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM sales WHERE id NOT IN (SELECT sale_id FROM sale_items)')
+        delivered_sales_rows = self.execute_query('''
+            SELECT COALESCE(SUM(s.quantity),0) AS total
+            FROM sales s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM sale_items si WHERE si.sale_id = s.id
+            )
+        ''')
         delivered_sales_total = int(delivered_sales_rows[0]['total']) if delivered_sales_rows else 0
         returned_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM cylinder_returns')
         returned_total_basic = int(returned_rows[0]['total']) if returned_rows else 0
@@ -1251,7 +1321,9 @@ class DatabaseManager:
                         CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
                         quantity as qty
                     FROM cylinder_returns
-                    WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
+                                        WHERE client_id = ?
+                                            AND created_at >= (?::date)
+                                            AND created_at < (?::date + INTERVAL '1 day')
                 ) t
                 GROUP BY gas_type, sub_type, cap_group
             )
@@ -1291,7 +1363,9 @@ class DatabaseManager:
                     FROM sale_items si
                     JOIN sales s ON si.sale_id = s.id
                     JOIN gas_products gp ON si.gas_product_id = gp.id
-                    WHERE s.client_id = ? AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+                                        WHERE s.client_id = ?
+                                            AND s.created_at >= (?::date)
+                                            AND s.created_at < (?::date + INTERVAL '1 day')
                     UNION ALL
                     SELECT 
                         s.gas_product_id,
@@ -1300,7 +1374,10 @@ class DatabaseManager:
                     FROM sales s
                     LEFT JOIN sale_items si ON si.sale_id = s.id
                     JOIN gas_products gp ON s.gas_product_id = gp.id
-                    WHERE s.client_id = ? AND si.id IS NULL AND DATE(s.created_at, 'localtime') BETWEEN ? AND ?
+                                        WHERE s.client_id = ?
+                                            AND si.id IS NULL
+                                            AND s.created_at >= (?::date)
+                                            AND s.created_at < (?::date + INTERVAL '1 day')
                 ) t
                 JOIN gas_products gp ON t.gas_product_id = gp.id
                 GROUP BY gp.gas_type, gp.sub_type, cap_group

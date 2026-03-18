@@ -20,43 +20,68 @@ class AddEmployeeDialog(QDialog):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Form layout
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self.setStyleSheet("""
+            QDialog { background-color: #f4f7fb; }
+            QLabel { color: #1e293b; font-size: 13px; }
+            QLineEdit, QComboBox, QDateEdit, QDoubleSpinBox {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 30px;
+                background: #ffffff;
+            }
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QDoubleSpinBox:focus {
+                border: 1px solid #2563eb;
+            }
+            QPushButton {
+                background-color: #2563eb;
+                color: white;
+                border: 1px solid #1d4ed8;
+                border-radius: 6px;
+                padding: 6px 14px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #1d4ed8; }
+        """)
+
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
-        
+        form_layout.setLabelAlignment(Qt.AlignLeft)
+
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Enter employee name")
         form_layout.addRow("Name *:", self.name_input)
-        
+
         self.role_combo = QComboBox()
         self.role_combo.addItems([
             "Manager", "Accountant", "Gate Operator", "Driver", "Technician", "Helper", "Security"
         ])
         form_layout.addRow("Role *:", self.role_combo)
-        
+
         self.salary_spinbox = QDoubleSpinBox()
         self.salary_spinbox.setRange(0, 1000000)
         self.salary_spinbox.setDecimals(2)
         self.salary_spinbox.setPrefix("Rs. ")
         self.salary_spinbox.setSingleStep(1000)
         form_layout.addRow("Salary *:", self.salary_spinbox)
-        
+
         self.contact_input = QLineEdit()
         self.contact_input.setPlaceholderText("Enter phone number")
         form_layout.addRow("Contact:", self.contact_input)
-        
+
         self.joining_date_edit = QDateEdit()
         self.joining_date_edit.setDate(QDate.currentDate())
         self.joining_date_edit.setCalendarPopup(True)
         form_layout.addRow("Joining Date *:", self.joining_date_edit)
-        
+
         layout.addLayout(form_layout)
-        
-        # Buttons
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.button(QDialogButtonBox.Ok).setText("Save")
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -117,23 +142,61 @@ class EmployeesWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Title
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self.setStyleSheet("""
+            QLabel { color: #1e293b; }
+            QLineEdit, QComboBox {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 30px;
+                background: #ffffff;
+            }
+            QLineEdit:focus, QComboBox:focus { border: 1px solid #2563eb; }
+            QGroupBox {
+                border: 1px solid #dbe4f0;
+                border-radius: 10px;
+                margin-top: 8px;
+                background: #ffffff;
+                font-weight: 600;
+                color: #1e3a8a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QTableWidget {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                gridline-color: #e5e7eb;
+                background: #ffffff;
+            }
+            QTableWidget::item { padding: 6px; }
+            QTableWidget::item:selected { background-color: #e6f0ff; color: #0f172a; }
+            QHeaderView::section {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }
+        """)
+
         title_label = QLabel("Employee Management")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 700; color: #1e3a8a;")
         layout.addWidget(title_label)
-        
-        # Search and controls
+
         controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(10)
-        
+        controls_layout.setSpacing(8)
+
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name, role, or contact...")
         self.search_input.textChanged.connect(self.filter_employees)
         controls_layout.addWidget(self.search_input)
-        
+
         self.role_filter_combo = QComboBox()
         self.role_filter_combo.addItem("All Roles")
         self.role_filter_combo.addItems([
@@ -141,61 +204,99 @@ class EmployeesWidget(QWidget):
         ])
         self.role_filter_combo.currentTextChanged.connect(self.filter_employees)
         controls_layout.addWidget(self.role_filter_combo)
-        
+
         self.add_employee_btn = QPushButton("Add New Employee")
         self.add_employee_btn.clicked.connect(self.add_employee)
+        self.add_employee_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #16a34a;
+                color: white;
+                border: 1px solid #15803d;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #15803d; }
+        """)
         controls_layout.addWidget(self.add_employee_btn)
-        
+
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.load_employees)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0ea5e9;
+                color: white;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #0284c7; }
+        """)
         controls_layout.addWidget(self.refresh_btn)
-        
+
         layout.addLayout(controls_layout)
-        
-        # Employees table
+
         self.employees_table = QTableWidget()
         self.employees_table.setColumnCount(7)
         self.employees_table.setHorizontalHeaderLabels([
             "ID", "Name", "Role", "Salary", "Contact", "Joining Date", "Actions"
         ])
-        
-        # Configure table
+
         self.employees_table.setAlternatingRowColors(True)
         self.employees_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.employees_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.employees_table.horizontalHeader().setStretchLastSection(True)
-        self.employees_table.setColumnWidth(0, 50)   # ID
-        self.employees_table.setColumnWidth(1, 200)  # Name
-        self.employees_table.setColumnWidth(2, 120)  # Role
-        self.employees_table.setColumnWidth(3, 120)  # Salary
-        self.employees_table.setColumnWidth(4, 120)  # Contact
-        self.employees_table.setColumnWidth(5, 120)  # Joining Date
-        self.employees_table.setColumnWidth(6, 150)  # Actions
-        
+        self.employees_table.setShowGrid(True)
+        self.employees_table.verticalHeader().setVisible(False)
+        self.employees_table.verticalHeader().setDefaultSectionSize(42)
+        self.employees_table.setFocusPolicy(Qt.NoFocus)
+
+        header = self.employees_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.employees_table.setColumnWidth(6, 220)
+
         layout.addWidget(self.employees_table)
-        
-        # Salary report section
+
         salary_group = QGroupBox("Salary Summary")
         salary_layout = QHBoxLayout()
-        salary_layout.setSpacing(20)
-        
+        salary_layout.setSpacing(14)
+
         self.total_salary_label = QLabel("Total Monthly Salary: Rs. 0.00")
-        self.total_salary_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.total_salary_label.setStyleSheet("font-weight: 700; font-size: 13px; color: #0f172a;")
         salary_layout.addWidget(self.total_salary_label)
-        
+
         self.employee_count_label = QLabel("Total Employees: 0")
-        self.employee_count_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.employee_count_label.setStyleSheet("font-weight: 700; font-size: 13px; color: #0f172a;")
         salary_layout.addWidget(self.employee_count_label)
-        
+
         self.generate_report_btn = QPushButton("Generate Salary Report")
         self.generate_report_btn.clicked.connect(self.generate_salary_report)
+        self.generate_report_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1d4ed8;
+                color: white;
+                border: 1px solid #1e40af;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #1e40af; }
+        """)
         salary_layout.addWidget(self.generate_report_btn)
-        
+
         salary_layout.addStretch()
         salary_group.setLayout(salary_layout)
         layout.addWidget(salary_group)
-        
-        # Set role-based permissions
+
         self.set_role_permissions()
     
     def set_role_permissions(self):
@@ -243,8 +344,8 @@ class EmployeesWidget(QWidget):
             # Actions
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setSpacing(5)
-            actions_layout.setContentsMargins(5, 5, 5, 5)
+            actions_layout.setSpacing(4)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
             
             view_btn = QPushButton("View")
             view_btn.setStyleSheet("""
@@ -253,15 +354,17 @@ class EmployeesWidget(QWidget):
                     color: white;
                     border: 1px solid #138496;
                     border-radius: 6px;
-                    padding: 6px 12px;
-                    font-size: 13px;
+                    padding: 3px 8px;
+                    font-size: 11px;
                     font-weight: 600;
                 }
                 QPushButton:hover { background-color: #138496; }
                 QPushButton:pressed { background-color: #117a8b; }
             """)
-            view_btn.setMinimumWidth(96)
-            view_btn.setFixedHeight(32)
+            view_btn.setMinimumWidth(56)
+            view_btn.setMaximumWidth(66)
+            view_btn.setFixedHeight(24)
+            view_btn.setFocusPolicy(Qt.NoFocus)
             view_btn.clicked.connect(lambda checked, e=employee: self.view_employee(e))
             actions_layout.addWidget(view_btn)
             
@@ -273,15 +376,17 @@ class EmployeesWidget(QWidget):
                         color: white;
                         border: 1px solid #1e7e34;
                         border-radius: 6px;
-                        padding: 6px 12px;
-                        font-size: 13px;
+                        padding: 3px 8px;
+                        font-size: 11px;
                         font-weight: 600;
                     }
                     QPushButton:hover { background-color: #218838; }
                     QPushButton:pressed { background-color: #1e7e34; }
                 """)
-                edit_btn.setMinimumWidth(96)
-                edit_btn.setFixedHeight(32)
+                edit_btn.setMinimumWidth(56)
+                edit_btn.setMaximumWidth(66)
+                edit_btn.setFixedHeight(24)
+                edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.clicked.connect(lambda checked, e=employee: self.edit_employee(e))
                 actions_layout.addWidget(edit_btn)
                 
@@ -292,17 +397,21 @@ class EmployeesWidget(QWidget):
                         color: white;
                         border: 1px solid #bd2130;
                         border-radius: 6px;
-                        padding: 6px 12px;
-                        font-size: 13px;
+                        padding: 3px 8px;
+                        font-size: 11px;
                         font-weight: 600;
                     }
                     QPushButton:hover { background-color: #c82333; }
                     QPushButton:pressed { background-color: #bd2130; }
                 """)
-                delete_btn.setMinimumWidth(96)
-                delete_btn.setFixedHeight(32)
+                delete_btn.setMinimumWidth(56)
+                delete_btn.setMaximumWidth(66)
+                delete_btn.setFixedHeight(24)
+                delete_btn.setFocusPolicy(Qt.NoFocus)
                 delete_btn.clicked.connect(lambda checked, e=employee: self.delete_employee(e))
                 actions_layout.addWidget(delete_btn)
+
+            actions_layout.addStretch()
             
             self.employees_table.setCellWidget(row, 6, actions_widget)
     

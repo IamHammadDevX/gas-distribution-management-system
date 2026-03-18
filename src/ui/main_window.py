@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                                QPushButton, QLabel, QStackedWidget, QMessageBox, QStatusBar, QFrame, QSizePolicy, QScrollArea, QGroupBox, QTableWidget, QTableWidgetItem)
+from PySide6.QtWidgets import QHeaderView
 from PySide6.QtCore import Qt, QTimer, QDateTime, QTime
 from PySide6.QtGui import QFont, QGuiApplication
 from src.database_module import DatabaseManager
@@ -360,14 +361,44 @@ class MainWindow(QMainWindow):
         """Create dashboard widget"""
         from PySide6.QtWidgets import QGridLayout
         widget = QWidget()
+        widget.setStyleSheet("""
+            QWidget { background-color: #f4f7fb; }
+            QGroupBox {
+                border: 1px solid #dbe4f0;
+                border-radius: 10px;
+                margin-top: 8px;
+                background-color: #ffffff;
+                color: #1e3a8a;
+                font-weight: 700;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QTableWidget {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background: #ffffff;
+                gridline-color: #e5e7eb;
+            }
+            QTableWidget::item:selected { background-color: #e6f0ff; color: #0f172a; }
+            QHeaderView::section {
+                background-color: #2563eb;
+                color: white;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }
+        """)
         layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(14)
+        layout.setContentsMargins(18, 18, 18, 18)
         top_bar = self.create_dashboard_top_bar()
         layout.addWidget(top_bar)
 
         stats_layout = QGridLayout()
-        stats_layout.setSpacing(20)
+        stats_layout.setSpacing(12)
 
         stats = self.get_dashboard_stats()
         stat_cards = [
@@ -393,6 +424,14 @@ class MainWindow(QMainWindow):
         self.top_pending_table.setAlternatingRowColors(True)
         self.top_pending_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.top_pending_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.top_pending_table.verticalHeader().setVisible(False)
+        self.top_pending_table.verticalHeader().setDefaultSectionSize(34)
+        self.top_pending_table.setFocusPolicy(Qt.NoFocus)
+        pending_header = self.top_pending_table.horizontalHeader()
+        pending_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        pending_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        pending_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        pending_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         gbl.addWidget(self.top_pending_table)
         layout.addWidget(gb)
         self.update_top_pending_clients()
@@ -406,10 +445,9 @@ class MainWindow(QMainWindow):
         top_bar = QWidget()
         top_bar.setStyleSheet("""
             QWidget {
-                background-color: #f8f9fa;
-                border-radius: 25px;
-                padding: 15px 25px;
-                margin: 0;
+                background-color: #ffffff;
+                border: 1px solid #dbe4f0;
+                border-radius: 12px;
             }
         """)
         
@@ -423,9 +461,9 @@ class MainWindow(QMainWindow):
         greeting_label = QLabel(f"{greeting}, {role_display}!")
         greeting_label.setStyleSheet("""
             QLabel {
-                color: #007bff;
+                color: #1d4ed8;
                 font-size: 18px;
-                font-weight: bold;
+                font-weight: 700;
                 padding: 0;
                 margin: 0;
             }
@@ -439,8 +477,8 @@ class MainWindow(QMainWindow):
         date_time_label = QLabel(current_datetime.toString("dddd, dd MMM yyyy, hh:mm AP"))
         date_time_label.setStyleSheet("""
             QLabel {
-                color: #6c757d;
-                font-size: 14px;
+                color: #475569;
+                font-size: 13px;
                 font-weight: normal;
                 padding: 0;
                 margin: 0;
@@ -457,13 +495,13 @@ class MainWindow(QMainWindow):
     def create_stat_card(self, title: str, value: str, color: str):
         """Create a statistics card"""
         card = QFrame()
-        card.setFrameStyle(QFrame.Box)
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: white;
-                border: 2px solid {color};
-                border-radius: 12px;
-                padding: 16px;
+                border: 1px solid #dbe4f0;
+                border-left: 5px solid {color};
+                border-radius: 10px;
+                padding: 12px;
             }}
         """)
         
@@ -471,13 +509,13 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         
         caption = QLabel(title)
-        caption.setStyleSheet(f"color: {color}; font-size: 13px; font-weight: 600;")
+        caption.setStyleSheet("color: #475569; font-size: 12px; font-weight: 600;")
         caption.setAlignment(Qt.AlignLeft)
         layout.addWidget(caption)
         
         value_label = QLabel(value if value is not None else "0")
         value_label.setObjectName(f"stat_value_{title}")
-        value_label.setStyleSheet(f"color: {color}; font-size: 26px; font-weight: 800;")
+        value_label.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: 800;")
         value_label.setAlignment(Qt.AlignLeft)
         layout.addWidget(value_label)
         

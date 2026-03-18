@@ -17,20 +17,63 @@ class ReportsWidget(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Title
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self.setStyleSheet("""
+            QLabel { color: #1e293b; }
+            QGroupBox {
+                border: 1px solid #dbe4f0;
+                border-radius: 10px;
+                margin-top: 8px;
+                background: #ffffff;
+                font-weight: 700;
+                color: #1e3a8a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QComboBox, QDateEdit {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 5px 8px;
+                min-height: 30px;
+                background: #ffffff;
+            }
+            QComboBox:focus, QDateEdit:focus { border: 1px solid #2563eb; }
+            QTextEdit {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background-color: #f8fbff;
+                font-family: Consolas;
+                font-size: 12px;
+            }
+            QTableWidget {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background: #ffffff;
+                gridline-color: #e5e7eb;
+            }
+            QTableWidget::item:selected { background-color: #e6f0ff; color: #0f172a; }
+            QHeaderView::section {
+                background-color: #2563eb;
+                color: white;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }
+        """)
+
         title_label = QLabel("Reports")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 700; color: #1e3a8a;")
         layout.addWidget(title_label)
-        
-        # Report type selection
+
         report_group = QGroupBox("Report Configuration")
         report_layout = QHBoxLayout()
-        report_layout.setSpacing(15)
-        
-        # Report type
+        report_layout.setSpacing(10)
+
         report_layout.addWidget(QLabel("Report Type:"))
         self.report_type_combo = QComboBox()
         self.report_type_combo.addItems([
@@ -43,83 +86,127 @@ class ReportsWidget(QWidget):
         ])
         self.report_type_combo.currentTextChanged.connect(self.on_report_type_changed)
         report_layout.addWidget(self.report_type_combo)
-        
-        # Date range
+
         report_layout.addWidget(QLabel("From:"))
         self.from_date_edit = QDateEdit()
         self.from_date_edit.setDate(QDate.currentDate().addDays(-30))
         self.from_date_edit.setCalendarPopup(True)
         report_layout.addWidget(self.from_date_edit)
-        
+
         report_layout.addWidget(QLabel("To:"))
         self.to_date_edit = QDateEdit()
         self.to_date_edit.setDate(QDate.currentDate())
         self.to_date_edit.setCalendarPopup(True)
         report_layout.addWidget(self.to_date_edit)
-        
-        # Generate button
+
         self.generate_btn = QPushButton("Generate Report")
+        self.generate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1d4ed8;
+                color: white;
+                border: 1px solid #1e40af;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #1e40af; }
+        """)
         self.generate_btn.clicked.connect(self.generate_report)
         report_layout.addWidget(self.generate_btn)
-        
+
         report_layout.addStretch()
         report_group.setLayout(report_layout)
         layout.addWidget(report_group)
-        
-        # Report content
+
         content_group = QGroupBox("Report Content")
         content_layout = QVBoxLayout()
         content_layout.setSpacing(10)
-        
-        # Report summary
+
         self.summary_text = QTextEdit()
         self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(150)
-        self.summary_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                font-family: 'Courier New';
-                font-size: 12px;
-            }
-        """)
+        self.summary_text.setMaximumHeight(160)
         content_layout.addWidget(self.summary_text)
-        
-        # Report table
+
         self.report_table = QTableWidget()
         self.report_table.setAlternatingRowColors(True)
         self.report_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.report_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.report_table.verticalHeader().setVisible(False)
+        self.report_table.verticalHeader().setDefaultSectionSize(34)
+        self.report_table.setFocusPolicy(Qt.NoFocus)
         content_layout.addWidget(self.report_table)
-        
+
         content_group.setLayout(content_layout)
         layout.addWidget(content_group)
-        
-        # Export controls
+
         export_layout = QHBoxLayout()
-        export_layout.setSpacing(10)
-        
+        export_layout.setSpacing(8)
+
         self.export_csv_btn = QPushButton("Export as CSV")
+        self.export_csv_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0ea5e9;
+                color: white;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 28px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #0284c7; }
+        """)
         self.export_csv_btn.clicked.connect(self.export_csv)
         export_layout.addWidget(self.export_csv_btn)
-        
+
         self.export_json_btn = QPushButton("Export as JSON")
+        self.export_json_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #14b8a6;
+                color: white;
+                border: 1px solid #0f766e;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 28px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #0f766e; }
+        """)
         self.export_json_btn.clicked.connect(self.export_json)
         export_layout.addWidget(self.export_json_btn)
-        
+
         self.print_btn = QPushButton("Print Report")
+        self.print_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2563eb;
+                color: white;
+                border: 1px solid #1d4ed8;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 28px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #1d4ed8; }
+        """)
         self.print_btn.clicked.connect(self.print_report)
         export_layout.addWidget(self.print_btn)
-        
+
         export_layout.addStretch()
         layout.addLayout(export_layout)
-        
-        # Set role-based permissions
+
         self.set_role_permissions()
-        
-        # Generate initial report
+
         self.generate_report()
+
+    def _apply_table_resize(self, action_col=None):
+        header = self.report_table.horizontalHeader()
+        for index in range(self.report_table.columnCount()):
+            if action_col is not None and index == action_col:
+                header.setSectionResizeMode(index, QHeaderView.ResizeToContents)
+            elif index == 0:
+                header.setSectionResizeMode(index, QHeaderView.ResizeToContents)
+            else:
+                header.setSectionResizeMode(index, QHeaderView.Stretch)
     
     def set_role_permissions(self):
         """Set permissions based on user role"""
@@ -205,7 +292,7 @@ Number of Transactions: {len(sales)}
             self.report_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['tax_amount']:,.2f}"))
             self.report_table.setItem(row, 7, QTableWidgetItem(f"Rs. {sale['total_amount']:,.2f}"))
         
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
     
     def generate_outstanding_balances_report(self):
         """Generate outstanding balances report"""
@@ -242,7 +329,7 @@ Number of Clients with Outstanding Balance: {len(clients)}
             balance_item.setForeground(Qt.red)
             self.report_table.setItem(row, 5, balance_item)
         
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
     
     def generate_employee_report(self):
         """Generate employee report"""
@@ -288,7 +375,7 @@ Role Distribution:
             
             self.report_table.setItem(row, 4, QTableWidgetItem(employee['contact'] or ''))
         
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
     
     def generate_gas_type_summary(self):
         """Generate gas type summary report"""
@@ -345,7 +432,7 @@ Total Sales: Rs. {total_amount:,.2f}
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.report_table.setItem(row, 5, amount_item)
         
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
     
     def generate_client_summary(self):
         """Generate client summary report"""
@@ -391,7 +478,7 @@ Clients with Outstanding Balance: {clients_with_balance}
                 balance_item.setForeground(Qt.red)
             self.report_table.setItem(row, 5, balance_item)
         
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
 
     def generate_pending_cylinder_summary_report(self):
         """Generate pending cylinder summary by client"""
@@ -415,7 +502,7 @@ Clients with Pending Cylinders: {with_pending}
             if int(r['pending_cylinders']) > 0:
                 item.setForeground(Qt.red)
             self.report_table.setItem(i, 3, item)
-        self.report_table.resizeColumnsToContents()
+        self._apply_table_resize()
     
     def export_csv(self):
         """Export report as CSV"""
