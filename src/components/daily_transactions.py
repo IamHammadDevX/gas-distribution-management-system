@@ -51,21 +51,9 @@ class DailyTransactionsWidget(QWidget):
         sales_layout.addWidget(self.sales_table)
         layout.addWidget(sales_group)
 
-        gate_group = QGroupBox("Gate Activity")
-        gate_layout = QVBoxLayout(gate_group)
-        self.gate_table = QTableWidget()
-        self.gate_table.setColumnCount(8)
-        self.gate_table.setHorizontalHeaderLabels(["Gate Pass #", "Client", "Driver", "Vehicle", "Gas", "Capacity", "Out", "In"])
-        self.gate_table.setAlternatingRowColors(True)
-        self.gate_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.gate_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        gate_layout.addWidget(self.gate_table)
-        layout.addWidget(gate_group)
-
     def load_transactions(self):
         d_str = self.date_edit.date().toString('yyyy-MM-dd')
         self.load_sales_for_date(d_str)
-        self.load_gate_for_date(d_str)
 
     def load_sales_for_date(self, day_str):
         rows = self.db_manager.get_sales_for_date_with_summaries(day_str)
@@ -93,31 +81,6 @@ class DailyTransactionsWidget(QWidget):
             self.sales_table.setItem(i, 6, bal_item)
             self.sales_table.setItem(i, 7, QTableWidgetItem(r['cashier_name']))
 
-    def load_gate_for_date(self, day_str):
-        rows = self.db_manager.execute_query('''
-            SELECT gp.*, c.name as client_name
-            FROM gate_passes gp
-            JOIN clients c ON gp.client_id = c.id
-            WHERE DATE(gp.time_out, 'localtime') = ?
-            ORDER BY gp.created_at DESC
-        ''', (day_str,))
-        self.gate_table.setRowCount(len(rows))
-        for i, r in enumerate(rows):
-            self.gate_table.setItem(i, 0, QTableWidgetItem(r['gate_pass_number']))
-            self.gate_table.setItem(i, 1, QTableWidgetItem(r['client_name']))
-            self.gate_table.setItem(i, 2, QTableWidgetItem(r['driver_name']))
-            self.gate_table.setItem(i, 3, QTableWidgetItem(r['vehicle_number']))
-            self.gate_table.setItem(i, 4, QTableWidgetItem(r['gas_type']))
-            self.gate_table.setItem(i, 5, QTableWidgetItem(r['capacity']))
-            out_item = QTableWidgetItem(r['time_out'][:16] if r['time_out'] else "")
-            self.gate_table.setItem(i, 6, out_item)
-            in_item = QTableWidgetItem(r['time_in'][:16] if r['time_in'] else "Not returned")
-            if not r['time_in']:
-                in_item.setForeground(Qt.red)
-            else:
-                in_item.setForeground(Qt.darkGreen)
-            self.gate_table.setItem(i, 7, in_item)
-
     def print_daily_report(self):
         printer = QPrinter(QPrinter.HighResolution)
         printer.setPageSize(QPageSize(QPageSize.A4))
@@ -136,14 +99,6 @@ class DailyTransactionsWidget(QWidget):
                 row = []
                 for j in range(self.sales_table.columnCount()):
                     item = self.sales_table.item(i, j)
-                    row.append(item.text() if item else "")
-                html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
-            html.extend(["</table>", "<h3 style='font-size:12pt;'>Gate Activity</h3>", "<table border='1' cellspacing='0' cellpadding='6' style='width:100%; font-size:10pt; border-collapse:collapse;'>",
-                         "<tr><th>Gate Pass #</th><th>Client</th><th>Driver</th><th>Vehicle</th><th>Gas</th><th>Capacity</th><th>Out</th><th>In</th></tr>"])
-            for i in range(self.gate_table.rowCount()):
-                row = []
-                for j in range(self.gate_table.columnCount()):
-                    item = self.gate_table.item(i, j)
                     row.append(item.text() if item else "")
                 html.append(f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
             html.append("</table>")

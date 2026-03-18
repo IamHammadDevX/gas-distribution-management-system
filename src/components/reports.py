@@ -36,7 +36,6 @@ class ReportsWidget(QWidget):
         self.report_type_combo.addItems([
             "Sales Report",
             "Outstanding Balances",
-            "Gate Activity Report",
             "Employee Report",
             "Gas Type Summary",
             "Client Summary",
@@ -151,8 +150,6 @@ class ReportsWidget(QWidget):
                 self.generate_sales_report()
             elif report_type == "Outstanding Balances":
                 self.generate_outstanding_balances_report()
-            elif report_type == "Gate Activity Report":
-                self.generate_gate_activity_report()
             elif report_type == "Employee Report":
                 self.generate_employee_report()
             elif report_type == "Gas Type Summary":
@@ -244,55 +241,6 @@ Number of Clients with Outstanding Balance: {len(clients)}
             balance_item = QTableWidgetItem(f"Rs. {client['balance']:,.2f}")
             balance_item.setForeground(Qt.red)
             self.report_table.setItem(row, 5, balance_item)
-        
-        self.report_table.resizeColumnsToContents()
-    
-    def generate_gate_activity_report(self):
-        """Generate gate activity report"""
-        from_date = self.from_date_edit.date().toPython()
-        to_date = self.to_date_edit.date().toPython()
-        
-        # Get gate activity data
-        gate_passes = self.db_manager.get_gate_activity_report(from_date, to_date)
-        
-        # Calculate summary
-        total_out = len([gp for gp in gate_passes if gp['time_out']])
-        total_in = len([gp for gp in gate_passes if gp['time_in']])
-        
-        # Generate summary
-        summary = f"""
-GATE ACTIVITY REPORT
-Period: {from_date} to {to_date}
-Total Gate Passes Created: {len(gate_passes)}
-Total Cylinders Out: {total_out}
-Total Cylinders In: {total_in}
-Pending Return: {total_out - total_in}
-        """
-        self.summary_text.setPlainText(summary.strip())
-        
-        # Populate table
-        self.report_table.setColumnCount(7)
-        self.report_table.setHorizontalHeaderLabels([
-            "Gate Pass #", "Receipt #", "Client", "Driver", "Vehicle", "Time Out", "Time In"
-        ])
-        
-        self.report_table.setRowCount(len(gate_passes))
-        
-        for row, gate_pass in enumerate(gate_passes):
-            self.report_table.setItem(row, 0, QTableWidgetItem(gate_pass['gate_pass_number']))
-            self.report_table.setItem(row, 1, QTableWidgetItem(gate_pass['receipt_number']))
-            self.report_table.setItem(row, 2, QTableWidgetItem(gate_pass['client_name']))
-            self.report_table.setItem(row, 3, QTableWidgetItem(gate_pass['driver_name']))
-            self.report_table.setItem(row, 4, QTableWidgetItem(gate_pass['vehicle_number']))
-            
-            time_out = gate_pass['time_out'][:16] if gate_pass['time_out'] else ""
-            self.report_table.setItem(row, 5, QTableWidgetItem(time_out))
-            
-            time_in = gate_pass['time_in'][:16] if gate_pass['time_in'] else "Not returned"
-            time_in_item = QTableWidgetItem(time_in)
-            if not gate_pass['time_in']:
-                time_in_item.setForeground(Qt.red)
-            self.report_table.setItem(row, 6, time_in_item)
         
         self.report_table.resizeColumnsToContents()
     

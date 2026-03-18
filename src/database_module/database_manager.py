@@ -198,24 +198,6 @@ class DatabaseManager:
             )
             """,
             """
-            CREATE TABLE IF NOT EXISTS gate_passes (
-                id BIGSERIAL PRIMARY KEY,
-                gate_pass_number TEXT UNIQUE NOT NULL,
-                receipt_id BIGINT NOT NULL REFERENCES receipts(id),
-                client_id BIGINT NOT NULL REFERENCES clients(id),
-                driver_name TEXT NOT NULL,
-                vehicle_number TEXT NOT NULL,
-                gas_type TEXT NOT NULL,
-                capacity TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                time_out TIMESTAMPTZ,
-                expected_time_in TIMESTAMPTZ,
-                time_in TIMESTAMPTZ,
-                gate_operator_id BIGINT NOT NULL REFERENCES users(id),
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-            """
             CREATE TABLE IF NOT EXISTS client_initial_outstanding (
                 id BIGSERIAL PRIMARY KEY,
                 client_id BIGINT NOT NULL REFERENCES clients(id),
@@ -274,19 +256,6 @@ class DatabaseManager:
             )
             """,
             """
-            CREATE TABLE IF NOT EXISTS vehicle_expenses (
-                id BIGSERIAL PRIMARY KEY,
-                driver_id BIGINT REFERENCES employees(id),
-                driver_name TEXT,
-                vehicle_number TEXT,
-                expense_type TEXT NOT NULL,
-                amount DECIMAL(10,2) NOT NULL,
-                notes TEXT,
-                expense_date DATE NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-            """
             CREATE TABLE IF NOT EXISTS activity_logs (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT REFERENCES users(id),
@@ -319,15 +288,11 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)",
             "CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts (created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_gate_passes_receipt_id ON gate_passes (receipt_id)",
-            "CREATE INDEX IF NOT EXISTS idx_gate_passes_created_at ON gate_passes (created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_gate_passes_time_out ON gate_passes (time_out)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_client_week ON weekly_invoices (client_id, week_start, week_end)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_status ON weekly_invoices (status)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_payments_invoice ON weekly_payments (weekly_invoice_id)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_payments_payment_date ON weekly_payments (payment_date)",
             "CREATE INDEX IF NOT EXISTS idx_activity_logs_timestamp ON activity_logs (timestamp)",
-            "CREATE INDEX IF NOT EXISTS idx_vehicle_expenses_expense_date ON vehicle_expenses (expense_date)",
             "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (name)",
             "CREATE INDEX IF NOT EXISTS idx_clients_company ON clients (company)",
             "CREATE INDEX IF NOT EXISTS idx_client_initial_outstanding_client ON client_initial_outstanding (client_id)",
@@ -339,6 +304,8 @@ class DatabaseManager:
                     for ddl in ddl_statements:
                         cur.execute(ddl)
                     cur.execute("ALTER TABLE client_initial_outstanding ADD COLUMN IF NOT EXISTS sub_type TEXT")
+                    cur.execute("DROP TABLE IF EXISTS gate_passes")
+                    cur.execute("DROP TABLE IF EXISTS vehicle_expenses")
 
         rows = self.execute_query("SELECT COUNT(*) AS n FROM users WHERE role = 'Admin'")
         if not rows or int(rows[0]["n"]) == 0:
@@ -981,22 +948,6 @@ class DatabaseManager:
         '''
         return self.execute_query(query, (day,))
     
-    def get_next_gate_pass_number(self) -> str:
-        query = 'SELECT COUNT(*) + 1 AS n FROM gate_passes'
-        result = self.execute_query(query)
-        count = int(result[0]['n']) if result else 1
-        return f"GP-{datetime.now().year}-{str(count).zfill(6)}"
-    
-    def create_gate_pass(self, gate_pass_number: str, receipt_id: int, client_id: int, driver_name: str,
-                        vehicle_number: str, gas_type: str, capacity: str, quantity: int, gate_operator_id: int, expected_time_in: Optional[str] = None) -> int:
-        query = '''
-            INSERT INTO gate_passes (gate_pass_number, receipt_id, client_id, driver_name, 
-                                   vehicle_number, gas_type, capacity, quantity, gate_operator_id, time_out, expected_time_in)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-        '''
-        return self.execute_update(query, (gate_pass_number, receipt_id, client_id, driver_name,
-                                          vehicle_number, gas_type, capacity, quantity, gate_operator_id, expected_time_in))
-
     pass
 
     def get_return_rows_for_client_product(self, client_id: int, gas_type: str, capacity: str) -> List[Dict]:
@@ -1012,19 +963,6 @@ class DatabaseManager:
 
     def get_cylinder_summary_for_client(self, client_id: int):
         return self.get_client_cylinder_status(client_id)
-
-    def add_vehicle_expense(self, driver_id: Optional[int], driver_name: str, vehicle_number: str, expense_type: str, amount: float, notes: str, expense_date):
-        query = '''
-            INSERT INTO vehicle_expenses (driver_id, driver_name, vehicle_number, expense_type, amount, notes, expense_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        '''
-        return self.execute_update(query, (driver_id, driver_name, vehicle_number, expense_type, amount, notes, expense_date))
-
-    def get_vehicle_expenses_by_date(self, day) -> list:
-        query = '''
-            SELECT * FROM vehicle_expenses WHERE expense_date = ? ORDER BY created_at DESC
-        '''
-        return self.execute_query(query, (day,))
 
     def get_client_deliveries_with_returns(self, client_id: int) -> List[Dict]:
         rows = self.get_client_cylinder_status(client_id)
@@ -1123,16 +1061,7 @@ class DatabaseManager:
         return self.execute_query(query)
     
     def get_gate_activity_report(self, start_date: date, end_date: date) -> List[Dict]:
-        query = '''
-            SELECT gp.*, c.name AS client_name, u.full_name AS operator_name, r.receipt_number AS receipt_number
-            FROM gate_passes gp
-            JOIN clients c ON gp.client_id = c.id
-            JOIN users u ON gp.gate_operator_id = u.id
-            LEFT JOIN receipts r ON gp.receipt_id = r.id
-            WHERE DATE(gp.created_at) BETWEEN ? AND ?
-            ORDER BY gp.created_at DESC
-        '''
-        return self.execute_query(query, (start_date, end_date))
+        return []
     # Add to class DatabaseManager:
 
     def get_all_company_products(self):
@@ -1150,7 +1079,7 @@ class DatabaseManager:
         """
         List all company products with delivered, returned, and pending counts for this client.
         Delivered = initial outstanding + sum of sales quantities for the product
-        Returned = sum of cylinder_returns quantities (plus gate_passes time_in as additional returns)
+        Returned = sum of cylinder_returns quantities
         Pending = Delivered - Returned
         Returns: list of dict with gas_type, sub_type, capacity, delivered, returned, pending.
         """
@@ -1206,24 +1135,6 @@ class DatabaseManager:
         )
         returned_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in returns}
 
-        # Include gate_passes time_in as additional returns if present
-        gp_returns = self.execute_query(
-            '''
-            SELECT gas_type, capacity, COALESCE(SUM(quantity),0) AS qty
-            FROM gate_passes
-            WHERE client_id = ? AND time_in IS NOT NULL
-            GROUP BY gas_type, capacity
-            ''',
-            (client_id,)
-        )
-        for gr in gp_returns:
-            key_variants = [
-                (gr['gas_type'], gr.get('sub_type'), gr['capacity']),
-                (gr['gas_type'], None, gr['capacity'])
-            ]
-            for k in key_variants:
-                returned_map[k] = returned_map.get(k, 0) + int(gr['qty'])
-
         def group_cap(g, c):
             if g == 'LPG' and c in ('12kg', '15kg'):
                 return '12/15kg'
@@ -1272,8 +1183,6 @@ class DatabaseManager:
         delivered_sales_total = int(delivered_sales_rows[0]['total']) if delivered_sales_rows else 0
         returned_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM cylinder_returns')
         returned_total_basic = int(returned_rows[0]['total']) if returned_rows else 0
-        gp_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM gate_passes WHERE time_in IS NOT NULL')
-        returned_total_basic += int(gp_rows[0]['total']) if gp_rows else 0
         delivered_total_basic = init_total + delivered_items_total + delivered_sales_total
         pending_total_basic = max(0, delivered_total_basic - returned_total_basic)
         if pending_total_basic > 0:
@@ -1343,19 +1252,11 @@ class DatabaseManager:
                         quantity as qty
                     FROM cylinder_returns
                     WHERE client_id = ? AND DATE(created_at, 'localtime') BETWEEN ? AND ?
-                    UNION ALL
-                    SELECT 
-                        gas_type,
-                        NULL as sub_type,
-                        CASE WHEN gas_type='LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
-                        quantity as qty
-                    FROM gate_passes
-                    WHERE client_id = ? AND time_in IS NOT NULL AND DATE(time_in, 'localtime') BETWEEN ? AND ?
                 ) t
                 GROUP BY gas_type, sub_type, cap_group
             )
         '''
-        rows = self.execute_query(query, (client_id, week_start, week_end, client_id, week_start, week_end))
+        rows = self.execute_query(query, (client_id, week_start, week_end))
         return rows[0]['result'] if rows and rows[0]['result'] else "0"
 
     def get_weekly_sales_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:

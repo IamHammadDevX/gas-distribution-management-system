@@ -8,7 +8,6 @@ from src.components.clients import ClientsWidget
 from src.components.gas_products import GasProductsWidget
 from src.components.sales import SalesWidget
 from src.components.receipts import ReceiptsWidget
-from src.components.gate_passes import GatePassesWidget
 from src.components.employees import EmployeesWidget
 from src.components.reports import ReportsWidget
 from src.components.settings import SettingsWidget
@@ -179,11 +178,9 @@ class MainWindow(QMainWindow):
             ("Gas Products", "gas_products"),
             ("Sales", "sales"),
             ("Receipts", "receipts"),
-            ("Gate Passes", "gate_passes"),
             ("Cylinder Track", "cylinder_track"),
             ("Daily Transactions", "daily_transactions"),
             ("Weekly Payments", "weekly_payments"),
-            ("Vehicle Expenses", "vehicle_expenses"),
             ("Employees", "employees"),
             ("Reports", "reports"),
             ("Settings", "settings")
@@ -321,17 +318,6 @@ class MainWindow(QMainWindow):
         cylinder_widget = CylinderTrackWidget(self.db_manager, self.current_user)
         self.widgets["cylinder_track"] = cylinder_widget
         self.content_area.addWidget(cylinder_widget)
-
-        # Vehicle Expenses widget
-        from src.components.vehicle_expenses import VehicleExpensesWidget
-        vexp_widget = VehicleExpensesWidget(self.db_manager, self.current_user)
-        self.widgets["vehicle_expenses"] = vexp_widget
-        self.content_area.addWidget(vexp_widget)
-        
-        # Gate passes widget
-        gate_passes_widget = GatePassesWidget(self.db_manager, self.current_user)
-        self.widgets["gate_passes"] = gate_passes_widget
-        self.content_area.addWidget(gate_passes_widget)
 
         from src.components.weekly_payments import WeeklyPaymentsWidget
         weekly_widget = WeeklyPaymentsWidget(self.db_manager, self.current_user)
@@ -532,13 +518,8 @@ class MainWindow(QMainWindow):
         today_outstanding = result[0]['total'] if result else 0
 
         # Cylinder stats
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes WHERE DATE(time_out) = ?'
-        result = self.db_manager.execute_query(query, (today_str,))
-        cylinders_out_today = result[0]['total'] if result else 0
-
-        query = 'SELECT COALESCE(SUM(quantity), 0) as total FROM gate_passes WHERE DATE(time_in) = ?'
-        result = self.db_manager.execute_query(query, (today_str,))
-        cylinders_in_today = result[0]['total'] if result else 0
+        cylinders_out_today = 0
+        cylinders_in_today = 0
 
         totals = self.db_manager.get_total_cylinder_stats()
         total_delivered = int(totals['total_delivered'])
@@ -638,11 +619,11 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'gate_passes', 'cylinder_track', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'vehicle_expenses', 'cylinder_track', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'reports']
         elif role == 'Gate Operator':
-            enabled_modules = ['dashboard', 'daily_transactions', 'gate_passes']
+            enabled_modules = ['dashboard', 'daily_transactions']
         elif role == 'Driver':
             enabled_modules = ['dashboard']
         
@@ -672,8 +653,6 @@ class MainWindow(QMainWindow):
                 "receipts": "Receipts",
                 "daily_transactions": "Daily Transactions",
                 "weekly_payments": "Weekly Payments",
-                "vehicle_expenses": "Vehicle Expenses",
-                "gate_passes": "Gate Passes",
                 "cylinder_track": "Cylinder Track",
                 "employees": "Employee Management",
                 "reports": "Reports",
@@ -700,9 +679,6 @@ class MainWindow(QMainWindow):
             elif page_name == "receipts":
                 if hasattr(self.widgets['receipts'], 'load_receipts'):
                     self.widgets['receipts'].load_receipts()
-            elif page_name == "gate_passes":
-                if hasattr(self.widgets['gate_passes'], 'load_gate_passes'):
-                    self.widgets['gate_passes'].load_gate_passes()
             elif page_name == "daily_transactions":
                 if hasattr(self.widgets['daily_transactions'], 'load_transactions'):
                     self.widgets['daily_transactions'].load_transactions()

@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QTableWidget, QTableWidgetItem, QPushButton, QDialog,
-    QFormLayout, QDialogButtonBox, QSpinBox, QMessageBox
+    QFormLayout, QDialogButtonBox, QSpinBox, QMessageBox,
+    QFrame, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
@@ -18,8 +19,31 @@ class ReturnDialog(QDialog):
         self._init_ui()
 
     def _init_ui(self):
+        self.setStyleSheet("""
+            QDialog { background-color: #f5f6f8; }
+            QLabel { color: #1f2937; font-size: 13px; }
+            QSpinBox {
+                background: #ffffff;
+                border: 1px solid #cfd7df;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 28px;
+            }
+            QPushButton {
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        """)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
         prod_name = f"{self.product_row['gas_type']}{(' ' + self.product_row['sub_type']) if self.product_row.get('sub_type') else ''}"
         form.addRow("Product:", QLabel(f"{prod_name} - {self.product_row['capacity']}"))
         form.addRow("Pending:", QLabel(str(int(self.product_row.get('pending') or 0))))
@@ -77,33 +101,99 @@ class CylinderTrackWidget(QWidget):
         self.refresh_data()
 
     def _init_ui(self):
+        self.setStyleSheet("""
+            QWidget { background-color: #f5f6f8; color: #1f2937; font-size: 13px; }
+            QLabel#titleLabel { font-size: 24px; font-weight: 700; color: #1f4f82; }
+            QFrame#sectionCard { background: #ffffff; border: 1px solid #dbe1e7; border-radius: 10px; }
+            QLineEdit, QComboBox {
+                background: #ffffff;
+                border: 1px solid #cfd7df;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 30px;
+            }
+            QTableWidget {
+                background: #ffffff;
+                border: 1px solid #d7dde3;
+                border-radius: 8px;
+                gridline-color: #e9edf1;
+            }
+            QHeaderView::section {
+                background: #1f4f82;
+                color: #ffffff;
+                border: none;
+                border-right: 1px solid #174066;
+                border-bottom: 1px solid #174066;
+                padding: 8px;
+                font-weight: 600;
+            }
+        """)
+
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         title = QLabel("Cylinder Track")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("titleLabel")
         layout.addWidget(title)
 
-        header = QHBoxLayout()
+        header_card = QFrame()
+        header_card.setObjectName("sectionCard")
+        header = QHBoxLayout(header_card)
         header.setSpacing(10)
+        header.setContentsMargins(10, 10, 10, 10)
         header.addWidget(QLabel("Client:"))
         self.client_combo = QComboBox()
-        self.client_combo.setMinimumWidth(280)
+        self.client_combo.setMinimumWidth(300)
         self.client_combo.currentIndexChanged.connect(self.on_client_changed)
-        header.addWidget(self.client_combo)
-        layout.addLayout(header)
+        header.addWidget(self.client_combo, 1)
+        layout.addWidget(header_card)
 
+        table_card = QFrame()
+        table_card.setObjectName("sectionCard")
+        table_layout = QVBoxLayout(table_card)
+        table_layout.setContentsMargins(10, 10, 10, 10)
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             "Product", "Capacity", "Delivered", "Returned", "Pending", "Status", "Actions"
         ])
+        self._setup_table_base()
+        self._set_table_mode_details()
+        table_layout.addWidget(self.table)
+        layout.addWidget(table_card, 1)
+
+    def _setup_table_base(self):
         self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.table)
+        self.table.setWordWrap(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(38)
+        self.table.setMinimumHeight(340)
+
+    def _set_table_mode_all_clients(self):
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 140)
+        self.table.setColumnWidth(2, 130)
+
+    def _set_table_mode_details(self):
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.table.setColumnWidth(6, 96)
 
     def load_clients(self):
         try:
@@ -145,25 +235,21 @@ class CylinderTrackWidget(QWidget):
     def _populate_all_clients(self, rows):
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Client", "Pending Cylinders", "Phone", "Company"])
+        self._set_table_mode_all_clients()
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.table.setItem(i, 0, QTableWidgetItem(r['name']))
             self.table.setItem(i, 1, QTableWidgetItem(str(r['pending_cylinders'])))
             self.table.setItem(i, 2, QTableWidgetItem(r['phone']))
             self.table.setItem(i, 3, QTableWidgetItem(r.get('company') or ''))
-        # Hide extra columns if switching from detailed view
-        self.table.setColumnHidden(4, True)
-        self.table.setColumnHidden(5, True)
-        self.table.setColumnHidden(6, True)
+            self.table.setRowHeight(i, 38)
 
     def _populate(self, rows):
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             "Product", "Capacity", "Delivered", "Returned", "Pending", "Status", "Actions"
         ])
-        self.table.setColumnHidden(4, False)
-        self.table.setColumnHidden(5, False)
-        self.table.setColumnHidden(6, False)
+        self._set_table_mode_details()
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             prod_name = f"{r['gas_type']}{(' ' + r['sub_type']) if r.get('sub_type') else ''}"
@@ -181,8 +267,19 @@ class CylinderTrackWidget(QWidget):
 
             actions_widget = QWidget()
             h = QHBoxLayout(actions_widget)
-            h.setContentsMargins(5, 5, 5, 5)
+            h.setContentsMargins(1, 1, 1, 1)
+            h.setSpacing(2)
+            h.setAlignment(Qt.AlignCenter)
             btn = QPushButton("Return")
+            btn.setMinimumWidth(58)
+            btn.setFixedHeight(22)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet(
+                "QPushButton { background-color: #1a73e8; color: white; border: 1px solid #125bc4; border-radius: 5px; padding: 2px 6px; font-size: 10px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #1765cb; }"
+                "QPushButton:pressed { background-color: #125bc4; }"
+                "QPushButton:disabled { background-color: #aab7c4; border-color: #9aa8b6; color: #eef2f6; }"
+            )
             btn.setEnabled(int(r['pending']) > 0 and self.current_client is not None)
             def open_dialog(row_data=r):
                 if not self.current_client:
@@ -193,3 +290,4 @@ class CylinderTrackWidget(QWidget):
             btn.clicked.connect(lambda _checked=False, row_data=r: open_dialog(row_data))
             h.addWidget(btn)
             self.table.setCellWidget(i, 6, actions_widget)
+            self.table.setRowHeight(i, 34)
