@@ -264,10 +264,36 @@ class ClientsWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(16, 16, 16, 16)
+
+        self.setStyleSheet("""
+            QLabel { color: #1e293b; }
+            QLineEdit {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 30px;
+                background: #ffffff;
+            }
+            QLineEdit:focus { border: 1px solid #2563eb; }
+            QTableWidget {
+                border: 1px solid #dbe4f0;
+                border-radius: 8px;
+                background: #ffffff;
+                gridline-color: #e5e7eb;
+            }
+            QTableWidget::item { padding: 6px; }
+            QTableWidget::item:selected { background-color: #e6f0ff; color: #0f172a; }
+            QHeaderView::section {
+                background-color: #2563eb;
+                color: white;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }
+        """)
         
-        # Title
         title_label = QLabel("Client Management")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 700; color: #1e3a8a;")
         layout.addWidget(title_label)
         
         # Search and controls
@@ -281,10 +307,34 @@ class ClientsWidget(QWidget):
         
         self.add_client_btn = QPushButton("Add New Client")
         self.add_client_btn.clicked.connect(self.add_client)
+        self.add_client_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #16a34a;
+                color: white;
+                border: 1px solid #15803d;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #15803d; }
+        """)
         controls_layout.addWidget(self.add_client_btn)
         
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.load_clients)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0ea5e9;
+                color: white;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 30px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #0284c7; }
+        """)
         controls_layout.addWidget(self.refresh_btn)
         
         layout.addLayout(controls_layout)
@@ -300,8 +350,9 @@ class ClientsWidget(QWidget):
         self.clients_table.setAlternatingRowColors(True)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.clients_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.clients_table.setFocusPolicy(Qt.NoFocus)
         self.clients_table.verticalHeader().setVisible(False)
-        self.clients_table.setShowGrid(False)
+        self.clients_table.setShowGrid(True)
         self.clients_table.setWordWrap(False)
         self.clients_table.horizontalHeader().setStretchLastSection(False)
         self.clients_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -319,7 +370,7 @@ class ClientsWidget(QWidget):
         self.clients_table.setColumnWidth(4, 120)  # Total Purchases
         self.clients_table.setColumnWidth(5, 120)  # Total Paid
         self.clients_table.setColumnWidth(6, 100)  # Balance
-        self.clients_table.setColumnWidth(7, 250)  # Actions
+        self.clients_table.setColumnWidth(7, 225)  # Actions
         
         layout.addWidget(self.clients_table)
         
@@ -375,7 +426,8 @@ class ClientsWidget(QWidget):
                 actions_layout.setAlignment(Qt.AlignCenter)
 
                 view_btn = QPushButton("View")
-                view_btn.setMinimumWidth(62)
+                view_btn.setMinimumWidth(58)
+                view_btn.setMaximumWidth(66)
                 view_btn.setFixedHeight(24)
                 view_btn.setFocusPolicy(Qt.NoFocus)
                 view_btn.setStyleSheet("""
@@ -387,7 +439,8 @@ class ClientsWidget(QWidget):
                 actions_layout.addWidget(view_btn)
             
                 edit_btn = QPushButton("Edit")
-                edit_btn.setMinimumWidth(62)
+                edit_btn.setMinimumWidth(58)
+                edit_btn.setMaximumWidth(66)
                 edit_btn.setFixedHeight(24)
                 edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.setStyleSheet("""
@@ -400,7 +453,8 @@ class ClientsWidget(QWidget):
             
                 if self.current_user['role'] == 'Admin':
                     delete_btn = QPushButton("Delete")
-                    delete_btn.setMinimumWidth(62)
+                    delete_btn.setMinimumWidth(58)
+                    delete_btn.setMaximumWidth(66)
                     delete_btn.setFixedHeight(24)
                     delete_btn.setFocusPolicy(Qt.NoFocus)
                     delete_btn.setStyleSheet("""
@@ -410,6 +464,8 @@ class ClientsWidget(QWidget):
                     """)
                     delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
                     actions_layout.addWidget(delete_btn)
+
+                actions_layout.addStretch()
 
                 self.clients_table.setCellWidget(row, 7, actions_widget)
                 self.clients_table.setRowHeight(row, 40)
