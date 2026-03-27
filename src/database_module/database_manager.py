@@ -896,7 +896,8 @@ class DatabaseManager:
                 COALESCE(SUM(s.quantity * s.unit_price),0) AS gross_total,
                 COALESCE(SUM(s.subtotal),0) AS subtotal,
                 COALESCE(SUM(s.tax_amount),0) AS tax_amount,
-                COALESCE(SUM(s.total_amount),0) AS total_payable
+                COALESCE(SUM(s.total_amount),0) AS week_sales_total,
+                COALESCE(SUM(s.balance),0) AS week_outstanding
             FROM sales s
             WHERE s.client_id = ?
               AND s.created_at >= (?::date)
@@ -907,8 +908,10 @@ class DatabaseManager:
         gross_total = float(items_rows[0]['gross_total']) if items_has_data else (float(sales_rows[0]['gross_total']) if sales_rows else 0.0)
         subtotal = float(items_rows[0]['subtotal']) if items_has_data else (float(sales_rows[0]['subtotal']) if sales_rows else 0.0)
         tax_amount = float(items_rows[0]['tax_amount']) if items_has_data else (float(sales_rows[0]['tax_amount']) if sales_rows else 0.0)
-        total_payable = float(sales_rows[0]['total_payable']) if sales_rows else (float(items_rows[0]['items_total']) if items_has_data else 0.0)
-        discount = max(0.0, gross_total + tax_amount - total_payable)
+        week_sales_total = float(sales_rows[0]['week_sales_total']) if sales_rows else (float(items_rows[0]['items_total']) if items_has_data else 0.0)
+        # Weekly payable should represent unpaid amount only, not gross sale amount.
+        total_payable = float(sales_rows[0]['week_outstanding']) if sales_rows else 0.0
+        discount = max(0.0, gross_total + tax_amount - week_sales_total)
         prev_rows = self.execute_query('''
             SELECT COALESCE(SUM(balance),0) AS prev_balance
             FROM sales
