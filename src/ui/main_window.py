@@ -12,6 +12,7 @@ from src.components.receipts import ReceiptsWidget
 from src.components.employees import EmployeesWidget
 from src.components.reports import ReportsWidget
 from src.components.settings import SettingsWidget
+from src.components.cylinder_availability import CylinderAvailabilityWidget
 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -177,6 +178,7 @@ class MainWindow(QMainWindow):
             ("Dashboard", "dashboard"),
             ("Clients", "clients"),
             ("Gas Products", "gas_products"),
+            ("Cylinder Availability", "cylinder_availability"),
             ("Sales", "sales"),
             ("Receipts", "receipts"),
             ("Cylinder Track", "cylinder_track"),
@@ -297,6 +299,11 @@ class MainWindow(QMainWindow):
         gas_products_widget = GasProductsWidget(self.db_manager, self.current_user)
         self.widgets["gas_products"] = gas_products_widget
         self.content_area.addWidget(gas_products_widget)
+
+        # Cylinder Availability widget
+        cylinder_availability_widget = CylinderAvailabilityWidget(self.db_manager, self.current_user)
+        self.widgets["cylinder_availability"] = cylinder_availability_widget
+        self.content_area.addWidget(cylinder_availability_widget)
         
         # Sales widget
         sales_widget = SalesWidget(self.db_manager, self.current_user)
@@ -657,11 +664,11 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'reports']
         elif role == 'Gate Operator':
-            enabled_modules = ['dashboard', 'daily_transactions']
+            enabled_modules = ['dashboard', 'daily_transactions', 'cylinder_availability']
         elif role == 'Driver':
             enabled_modules = ['dashboard']
         
@@ -687,6 +694,7 @@ class MainWindow(QMainWindow):
                 "dashboard": "Dashboard",
                 "clients": "Client Management",
                 "gas_products": "Gas Products",
+                "cylinder_availability": "Cylinder Availability",
                 "sales": "Sales & Billing",
                 "receipts": "Receipts",
                 "daily_transactions": "Daily Transactions",
@@ -709,6 +717,9 @@ class MainWindow(QMainWindow):
             elif page_name == "gas_products":
                 if hasattr(self.widgets['gas_products'], 'load_products'):
                     self.widgets['gas_products'].load_products()
+            elif page_name == "cylinder_availability":
+                if hasattr(self.widgets['cylinder_availability'], 'load_data'):
+                    self.widgets['cylinder_availability'].load_data()
             elif page_name == "sales":
                 if hasattr(self.widgets['sales'], 'load_gas_products'):
                     self.widgets['sales'].load_gas_products()

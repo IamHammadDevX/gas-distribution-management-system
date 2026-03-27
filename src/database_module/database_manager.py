@@ -308,6 +308,30 @@ class DatabaseManager:
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS cylinder_inventory (
+                id BIGSERIAL PRIMARY KEY,
+                gas_product_id BIGINT NOT NULL UNIQUE REFERENCES gas_products(id) ON DELETE CASCADE,
+                opening_count INTEGER NOT NULL DEFAULT 0,
+                sold_count INTEGER NOT NULL DEFAULT 0,
+                returned_count INTEGER NOT NULL DEFAULT 0,
+                available_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS cylinder_stock_movements (
+                id BIGSERIAL PRIMARY KEY,
+                gas_product_id BIGINT NOT NULL REFERENCES gas_products(id) ON DELETE CASCADE,
+                movement_type TEXT NOT NULL CHECK(movement_type IN ('OPENING', 'SALE_OUT', 'RETURN_IN')),
+                quantity INTEGER NOT NULL,
+                reference_type TEXT,
+                reference_id BIGINT,
+                client_id BIGINT REFERENCES clients(id),
+                created_by BIGINT REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)",
             "CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)",
             "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
@@ -330,6 +354,9 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_receipts_client_id ON receipts (client_id)",
             "CREATE INDEX IF NOT EXISTS idx_cylinder_returns_client_created ON cylinder_returns (client_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_cylinder_returns_client_product ON cylinder_returns (client_id, gas_type, sub_type, capacity)",
+            "CREATE INDEX IF NOT EXISTS idx_cylinder_inventory_product ON cylinder_inventory (gas_product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_stock_movements_product_type_time ON cylinder_stock_movements (gas_product_id, movement_type, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_stock_movements_client_time ON cylinder_stock_movements (client_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_created_at ON weekly_invoices (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_receipt_number ON weekly_invoices (receipt_number)",
             "CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1 INCREMENT BY 1",
@@ -345,6 +372,32 @@ class DatabaseManager:
                     cur.execute("ALTER TABLE client_initial_outstanding ADD COLUMN IF NOT EXISTS sub_type TEXT")
                     cur.execute("DROP TABLE IF EXISTS gate_passes")
                     cur.execute("DROP TABLE IF EXISTS vehicle_expenses")
+                    cur.execute('''
+                        INSERT INTO cylinder_inventory (gas_product_id)
+                        SELECT id FROM gas_products
+                        ON CONFLICT (gas_product_id) DO NOTHING
+                    ''')
+                    cur.execute('''
+                        SELECT COALESCE(MAX((regexp_match(receipt_number, '^(?:RCP)-\\d{4}-(\\d+)$'))[1]::BIGINT), 0) AS max_n
+                        FROM receipts
+                    ''')
+                    max_receipt = int((cur.fetchone() or [0])[0] or 0)
+                    cur.execute("SELECT setval('receipt_number_seq', %s, true)", (max_receipt if max_receipt > 0 else 1,))
+
+                    cur.execute('''
+                        SELECT COALESCE(MAX((regexp_match(invoice_number, '^(?:WEEK)-\\d{4}-(\\d+)$'))[1]::BIGINT), 0) AS max_n
+                        FROM weekly_invoices
+                    ''')
+                    max_week_invoice = int((cur.fetchone() or [0])[0] or 0)
+                    cur.execute("SELECT setval('weekly_invoice_number_seq', %s, true)", (max_week_invoice if max_week_invoice > 0 else 1,))
+
+                    cur.execute('''
+                        SELECT COALESCE(MAX((regexp_match(receipt_number, '^(?:WRCP)-\\d{4}-(\\d+)$'))[1]::BIGINT), 0) AS max_n
+                        FROM weekly_invoices
+                        WHERE receipt_number IS NOT NULL
+                    ''')
+                    max_week_receipt = int((cur.fetchone() or [0])[0] or 0)
+                    cur.execute("SELECT setval('weekly_receipt_number_seq', %s, true)", (max_week_receipt if max_week_receipt > 0 else 1,))
 
         rows = self.execute_query("SELECT COUNT(*) AS n FROM users WHERE role = 'Admin'")
         if not rows or int(rows[0]["n"]) == 0:
@@ -502,7 +555,15 @@ class DatabaseManager:
             INSERT INTO gas_products (gas_type, sub_type, capacity, unit_price, description)
             VALUES (?, ?, ?, ?, ?)
         '''
-        return self.execute_update(query, (gas_type, sub_type, capacity, unit_price, description))
+        product_id = self.execute_update(query, (gas_type, sub_type, capacity, unit_price, description))
+        try:
+            self.execute_update('''
+                INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+                VALUES (?, 0, 0, 0, 0)
+            ''', (product_id,))
+        except Exception:
+            pass
+        return product_id
     
     def create_sale(self, client_id: int, gas_product_id: int, quantity: int, unit_price: float,
                    subtotal: float, tax_amount: float, total_amount: float, amount_paid: float,
@@ -517,13 +578,142 @@ class DatabaseManager:
         self.update_client_balance(client_id)
         return sale_id
 
+    def get_product_available_count(self, gas_product_id: int) -> int:
+        rows = self.execute_query('''
+            SELECT COALESCE(available_count, 0) AS available
+            FROM cylinder_inventory
+            WHERE gas_product_id = ?
+            LIMIT 1
+        ''', (gas_product_id,))
+        if rows:
+            return int(rows[0].get('available') or 0)
+        self.execute_update('''
+            INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+            VALUES (?, 0, 0, 0, 0)
+        ''', (gas_product_id,))
+        return 0
+
+    def _decrease_inventory_for_sale(self, gas_product_id: int, quantity: int, sale_id: Optional[int] = None,
+                                     client_id: Optional[int] = None, created_by: Optional[int] = None):
+        qty = int(quantity or 0)
+        if qty <= 0:
+            return
+        self.execute_update('''
+            INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+            VALUES (?, 0, 0, 0, 0)
+            ON CONFLICT (gas_product_id) DO NOTHING
+        ''', (gas_product_id,))
+        self.execute_update('''
+            UPDATE cylinder_inventory
+            SET sold_count = sold_count + ?,
+                available_count = available_count - ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE gas_product_id = ?
+        ''', (qty, qty, gas_product_id))
+        self.execute_update('''
+            INSERT INTO cylinder_stock_movements
+                (gas_product_id, movement_type, quantity, reference_type, reference_id, client_id, created_by)
+            VALUES (?, 'SALE_OUT', ?, 'SALE', ?, ?, ?)
+        ''', (gas_product_id, qty, sale_id, client_id, created_by))
+
+    def _increase_inventory_for_return(self, gas_product_id: int, quantity: int, return_id: Optional[int] = None,
+                                       client_id: Optional[int] = None, created_by: Optional[int] = None):
+        qty = int(quantity or 0)
+        if qty <= 0:
+            return
+        self.execute_update('''
+            INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+            VALUES (?, 0, 0, 0, 0)
+            ON CONFLICT (gas_product_id) DO NOTHING
+        ''', (gas_product_id,))
+        self.execute_update('''
+            UPDATE cylinder_inventory
+            SET returned_count = returned_count + ?,
+                available_count = available_count + ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE gas_product_id = ?
+        ''', (qty, qty, gas_product_id))
+        self.execute_update('''
+            INSERT INTO cylinder_stock_movements
+                (gas_product_id, movement_type, quantity, reference_type, reference_id, client_id, created_by)
+            VALUES (?, 'RETURN_IN', ?, 'CYLINDER_RETURN', ?, ?, ?)
+        ''', (gas_product_id, qty, return_id, client_id, created_by))
+
+    def set_cylinder_opening_count(self, gas_product_id: int, opening_count: int, created_by: Optional[int] = None) -> bool:
+        opening = max(0, int(opening_count or 0))
+        self.execute_update('''
+            INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+            VALUES (?, ?, 0, 0, ?)
+            ON CONFLICT (gas_product_id) DO UPDATE
+            SET opening_count = EXCLUDED.opening_count,
+                sold_count = 0,
+                returned_count = 0,
+                available_count = EXCLUDED.available_count,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (gas_product_id, opening, opening))
+        self.execute_update('''
+            INSERT INTO cylinder_stock_movements
+                (gas_product_id, movement_type, quantity, reference_type, reference_id, client_id, created_by)
+            VALUES (?, 'OPENING', ?, 'OPENING_SET', NULL, NULL, ?)
+        ''', (gas_product_id, opening, created_by))
+        return True
+
+    def get_cylinder_availability_rows(self, search_term: str = "") -> List[Dict]:
+        params: tuple = ()
+        where = ""
+        if search_term:
+            like = f"%{search_term.strip().lower()}%"
+            where = '''
+                WHERE LOWER(COALESCE(gp.gas_type, '')) LIKE ?
+                   OR LOWER(COALESCE(gp.sub_type, '')) LIKE ?
+                   OR LOWER(COALESCE(gp.capacity, '')) LIKE ?
+            '''
+            params = (like, like, like)
+        return self.execute_query(f'''
+            SELECT gp.id AS gas_product_id,
+                   gp.gas_type,
+                   gp.sub_type,
+                   gp.capacity,
+                   gp.is_active,
+                   COALESCE(ci.opening_count, 0) AS opening_count,
+                   COALESCE(ci.returned_count, 0) AS returned_count,
+                   COALESCE(ci.sold_count, 0) AS sold_count,
+                   COALESCE(ci.available_count, 0) AS available_count,
+                   COALESCE(ci.updated_at, gp.created_at) AS updated_at
+            FROM gas_products gp
+            LEFT JOIN cylinder_inventory ci ON ci.gas_product_id = gp.id
+            {where}
+            ORDER BY gp.gas_type, gp.sub_type, gp.capacity
+        ''', params)
+
+    def get_cylinder_availability_totals(self) -> Dict[str, int]:
+        rows = self.execute_query('''
+            SELECT COALESCE(SUM(opening_count),0) AS opening_total,
+                   COALESCE(SUM(returned_count),0) AS returned_total,
+                   COALESCE(SUM(sold_count),0) AS sold_total,
+                   COALESCE(SUM(available_count),0) AS available_total
+            FROM cylinder_inventory
+        ''')
+        data = rows[0] if rows else {}
+        return {
+            'opening_total': int(data.get('opening_total') or 0),
+            'returned_total': int(data.get('returned_total') or 0),
+            'sold_total': int(data.get('sold_total') or 0),
+            'available_total': int(data.get('available_total') or 0),
+        }
+
     def add_sale_item(self, sale_id: int, gas_product_id: int, quantity: int, unit_price: float,
                       subtotal: float, tax_amount: float, total_amount: float) -> int:
         query = '''
             INSERT INTO sale_items (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         '''
-        return self.execute_update(query, (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount))
+        item_id = self.execute_update(query, (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount))
+        sale_rows = self.execute_query('SELECT client_id, created_by FROM sales WHERE id = ?', (sale_id,))
+        client_id = sale_rows[0]['client_id'] if sale_rows else None
+        created_by = sale_rows[0].get('created_by') if sale_rows else None
+        self._decrease_inventory_for_sale(gas_product_id, int(quantity), sale_id=sale_id, client_id=client_id, created_by=created_by)
+        return item_id
 
     def update_sale_payment(self, sale_id: int, amount_paid: float) -> bool:
         query = 'UPDATE sales SET amount_paid = ?, balance = total_amount - ? WHERE id = ?'
@@ -542,20 +732,40 @@ class DatabaseManager:
         return self.execute_update(query, (receipt_number, sale_id, client_id, total_amount, amount_paid, balance, created_by))
     
     def get_next_receipt_number(self) -> str:
-        query = "SELECT nextval('receipt_number_seq') AS n"
-        result = self.execute_query(query)
-        count = int(result[0]['n']) if result else 1
-        return f"RCP-{datetime.now().year}-{str(count).zfill(6)}"
+        year = datetime.now().year
+        for _ in range(50):
+            result = self.execute_query("SELECT nextval('receipt_number_seq') AS n")
+            count = int(result[0]['n']) if result else 1
+            candidate = f"RCP-{year}-{str(count).zfill(6)}"
+            exists = self.execute_query("SELECT 1 AS x FROM receipts WHERE receipt_number = ? LIMIT 1", (candidate,))
+            if not exists:
+                return candidate
+        fallback = datetime.now().strftime("%Y%m%d%H%M%S")
+        return f"RCP-{year}-{fallback[-6:]}"
 
     def get_next_weekly_invoice_number(self) -> str:
-        rows = self.execute_query("SELECT nextval('weekly_invoice_number_seq') AS n")
-        n = rows[0]['n'] if rows else 1
-        return f"WEEK-{datetime.now().year}-{str(n).zfill(6)}"
+        year = datetime.now().year
+        for _ in range(50):
+            rows = self.execute_query("SELECT nextval('weekly_invoice_number_seq') AS n")
+            n = int(rows[0]['n']) if rows else 1
+            candidate = f"WEEK-{year}-{str(n).zfill(6)}"
+            exists = self.execute_query("SELECT 1 AS x FROM weekly_invoices WHERE invoice_number = ? LIMIT 1", (candidate,))
+            if not exists:
+                return candidate
+        fallback = datetime.now().strftime("%Y%m%d%H%M%S")
+        return f"WEEK-{year}-{fallback[-6:]}"
 
     def get_next_weekly_receipt_number(self) -> str:
-        rows = self.execute_query("SELECT nextval('weekly_receipt_number_seq') AS n")
-        n = rows[0]['n'] if rows else 1
-        return f"WRCP-{datetime.now().year}-{str(n).zfill(6)}"
+        year = datetime.now().year
+        for _ in range(50):
+            rows = self.execute_query("SELECT nextval('weekly_receipt_number_seq') AS n")
+            n = int(rows[0]['n']) if rows else 1
+            candidate = f"WRCP-{year}-{str(n).zfill(6)}"
+            exists = self.execute_query("SELECT 1 AS x FROM weekly_invoices WHERE receipt_number = ? LIMIT 1", (candidate,))
+            if not exists:
+                return candidate
+        fallback = datetime.now().strftime("%Y%m%d%H%M%S")
+        return f"WRCP-{year}-{fallback[-6:]}"
 
     def get_sale_items(self, sale_id: int) -> List[Dict]:
         items = self.execute_query('''
@@ -1236,7 +1446,29 @@ class DatabaseManager:
             INSERT INTO cylinder_returns (client_id, gas_type, sub_type, capacity, quantity)
             VALUES (?, ?, ?, ?, ?)
         '''
-        return self.execute_update(query, (client_id, gas_type, sub_type, capacity, int(quantity)))
+        return_id = self.execute_update(query, (client_id, gas_type, sub_type, capacity, int(quantity)))
+        try:
+            product_rows = self.execute_query('''
+                SELECT id
+                FROM gas_products
+                WHERE gas_type = ?
+                  AND COALESCE(sub_type, '') = COALESCE(?, '')
+                  AND capacity = ?
+                LIMIT 1
+            ''', (gas_type, sub_type, capacity))
+            if not product_rows and sub_type:
+                product_rows = self.execute_query('''
+                    SELECT id
+                    FROM gas_products
+                    WHERE gas_type = ? AND capacity = ?
+                    ORDER BY id
+                    LIMIT 1
+                ''', (gas_type, capacity))
+            if product_rows:
+                self._increase_inventory_for_return(int(product_rows[0]['id']), int(quantity), return_id=return_id, client_id=client_id)
+        except Exception:
+            pass
+        return return_id
 
     def get_total_cylinder_stats(self) -> Dict[str, int]:
         init_total_rows = self.execute_query('SELECT COALESCE(SUM(quantity),0) AS total FROM client_initial_outstanding')

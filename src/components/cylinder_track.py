@@ -83,6 +83,7 @@ class ReturnDialog(QDialog):
                         break
                 if mw:
                     mw.refresh_dashboard()
+                    mw.refresh_current_page("cylinder_availability")
             except Exception:
                 pass
             self.accept()

@@ -629,6 +629,7 @@ class SalesWidget(QWidget):
                     if mw:
                         mw.refresh_dashboard()
                         mw.refresh_current_page("weekly_payments")
+                        mw.refresh_current_page("cylinder_availability")
                 except Exception:
                     pass
             except Exception as e:
