@@ -60,7 +60,7 @@ class CylinderAvailabilityWidget(QWidget):
         title.setObjectName("titleLabel")
         root.addWidget(title)
 
-        hint = QLabel("Set Opening once, then system auto updates: Available = Opening + Returned - Sold")
+        hint = QLabel("Add Opening any time. Formula: Available = Opening + Returned - Sold")
         hint.setObjectName("hintLabel")
         root.addWidget(hint)
 
@@ -129,7 +129,7 @@ class CylinderAvailabilityWidget(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "Product", "Opening", "Returned", "Sold", "Available", "Updated", "Set Opening"
+            "Product", "Opening", "Returned", "Sold", "Available", "Updated", "Add Opening"
         ])
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -223,7 +223,7 @@ class CylinderAvailabilityWidget(QWidget):
 
             self.table.setItem(row, 5, QTableWidgetItem(str(data.get('updated_at') or '')))
 
-            set_btn = QPushButton("Set Opening")
+            set_btn = QPushButton("Add Opening")
             set_btn.setEnabled(self.can_edit_opening)
             set_btn.setFocusPolicy(Qt.NoFocus)
             set_btn.setStyleSheet("""
@@ -244,6 +244,35 @@ class CylinderAvailabilityWidget(QWidget):
             set_btn.clicked.connect(lambda _checked=False, d=data: self.set_opening_for_row(d))
             self.table.setCellWidget(row, 6, set_btn)
 
+    def _refresh_application(self):
+        try:
+            from PySide6.QtWidgets import QApplication
+            main_window = None
+            for widget in QApplication.topLevelWidgets():
+                if hasattr(widget, 'refresh_current_page') and hasattr(widget, 'widgets'):
+                    main_window = widget
+                    break
+            if not main_window:
+                return
+
+            main_window.refresh_dashboard()
+            for page_name in [
+                "cylinder_availability",
+                "cylinder_track",
+                "weekly_payments",
+                "daily_transactions",
+                "receipts",
+                "reports",
+                "sales",
+                "clients",
+            ]:
+                try:
+                    main_window.refresh_current_page(page_name)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     def set_opening_for_row(self, row_data: dict):
         if not self.can_edit_opening:
             return
@@ -254,16 +283,29 @@ class CylinderAvailabilityWidget(QWidget):
         product += f" - {row_data.get('capacity') or ''}"
 
         current_opening = int(row_data.get('opening_count') or 0)
+        current_returned = int(row_data.get('returned_count') or 0)
+        current_sold = int(row_data.get('sold_count') or 0)
+        current_available = int(row_data.get('available_count') or 0)
         value, ok = QInputDialog.getInt(
             self,
-            "Set Opening Cylinder Count",
-            f"Enter opening cylinders for:\n{product}",
-            current_opening,
+            "Add Opening Cylinders",
+            (
+                f"Product: {product}\n"
+                f"Current Opening: {current_opening}\n"
+                f"Current Returned: {current_returned}\n"
+                f"Current Sold: {current_sold}\n"
+                f"Current Available: {current_available}\n\n"
+                "Enter opening cylinders to add:"
+            ),
+            0,
             0,
             10_000_000,
             1,
         )
         if not ok:
+            return
+        if int(value) <= 0:
+            QMessageBox.warning(self, "Invalid Value", "Please enter a value greater than zero.")
             return
 
         try:
@@ -272,15 +314,8 @@ class CylinderAvailabilityWidget(QWidget):
                 int(value),
                 self.current_user.get('id')
             )
-            QMessageBox.information(self, "Success", "Opening cylinder count updated.")
+            QMessageBox.information(self, "Success", f"Opening cylinders added: {int(value)}")
             self.load_data()
-            try:
-                from PySide6.QtWidgets import QApplication
-                for widget in QApplication.topLevelWidgets():
-                    if hasattr(widget, 'refresh_dashboard'):
-                        widget.refresh_dashboard()
-                        break
-            except Exception:
-                pass
+            self._refresh_application()
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to set opening stock: {str(e)}")

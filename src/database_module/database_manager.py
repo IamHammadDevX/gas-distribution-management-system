@@ -641,20 +641,20 @@ class DatabaseManager:
 
     def set_cylinder_opening_count(self, gas_product_id: int, opening_count: int, created_by: Optional[int] = None) -> bool:
         opening = max(0, int(opening_count or 0))
+        if opening <= 0:
+            return True
         self.execute_update('''
             INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
             VALUES (?, ?, 0, 0, ?)
             ON CONFLICT (gas_product_id) DO UPDATE
-            SET opening_count = EXCLUDED.opening_count,
-                sold_count = 0,
-                returned_count = 0,
-                available_count = EXCLUDED.available_count,
+            SET opening_count = cylinder_inventory.opening_count + EXCLUDED.opening_count,
+                available_count = cylinder_inventory.available_count + EXCLUDED.available_count,
                 updated_at = CURRENT_TIMESTAMP
         ''', (gas_product_id, opening, opening))
         self.execute_update('''
             INSERT INTO cylinder_stock_movements
                 (gas_product_id, movement_type, quantity, reference_type, reference_id, client_id, created_by)
-            VALUES (?, 'OPENING', ?, 'OPENING_SET', NULL, NULL, ?)
+            VALUES (?, 'OPENING', ?, 'OPENING_ADD', NULL, NULL, ?)
         ''', (gas_product_id, opening, created_by))
         return True
 
