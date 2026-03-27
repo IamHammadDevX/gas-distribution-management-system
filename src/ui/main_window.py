@@ -567,9 +567,20 @@ class MainWindow(QMainWindow):
         cylinders_in_today = 0
 
         totals = self.db_manager.get_total_cylinder_stats()
-        total_delivered = int(totals['total_delivered'])
-        total_cylinders_in = int(totals['total_returned'])
-        pending_cylinders = int(totals['total_pending'])
+        total_delivered = int(totals.get('total_delivered') or 0)
+        total_cylinders_in = int(totals.get('total_returned') or 0)
+
+        # Use client-level pending summary as truth source for dashboard pending figure.
+        # This keeps dashboard consistent with Cylinder Track when initial outstanding is added.
+        try:
+            pending_rows = self.db_manager.get_pending_cylinder_summary_by_client()
+            pending_cylinders = sum(int(r.get('pending_cylinders') or 0) for r in pending_rows)
+        except Exception:
+            pending_cylinders = int(totals.get('total_pending') or 0)
+
+        # Keep total cylinders coherent if sources differ for legacy data.
+        if total_delivered < (pending_cylinders + total_cylinders_in):
+            total_delivered = pending_cylinders + total_cylinders_in
         
         return {
             'total_clients': total_clients,

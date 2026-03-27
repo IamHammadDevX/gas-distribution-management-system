@@ -383,6 +383,53 @@ class ClientsWidget(QWidget):
         
         if role == 'Driver':
             self.add_client_btn.setEnabled(False)
+
+    def _refresh_application_after_client_change(self):
+        """Refresh all dependent pages so client balance/cylinder changes are visible immediately."""
+        try:
+            from PySide6.QtWidgets import QApplication
+
+            main_window = None
+            for widget in QApplication.topLevelWidgets():
+                if hasattr(widget, 'widgets') and hasattr(widget, 'refresh_current_page'):
+                    main_window = widget
+                    break
+
+            if not main_window:
+                return
+
+            # Dashboard aggregates and every dependent page should update immediately.
+            main_window.refresh_dashboard()
+            for page_name in [
+                "clients",
+                "cylinder_track",
+                "cylinder_availability",
+                "weekly_payments",
+                "receipts",
+                "daily_transactions",
+            ]:
+                try:
+                    main_window.refresh_current_page(page_name)
+                except Exception:
+                    continue
+
+            # Reports page does not expose refresh_current_page hook; force regenerate if loaded.
+            reports_widget = main_window.widgets.get("reports") if hasattr(main_window, 'widgets') else None
+            if reports_widget and hasattr(reports_widget, 'generate_report'):
+                try:
+                    reports_widget.generate_report()
+                except Exception:
+                    pass
+
+            # Keep sales client panel consistent if currently selected.
+            sales_widget = main_window.widgets.get("sales") if hasattr(main_window, 'widgets') else None
+            if sales_widget and hasattr(sales_widget, 'on_client_selected'):
+                try:
+                    sales_widget.on_client_selected()
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def load_clients(self):
         """Load all clients from database"""
@@ -507,19 +554,7 @@ class ClientsWidget(QWidget):
                 
                 QMessageBox.information(self, "Success", "Client added successfully!")
                 self.load_clients()
-                try:
-                    from PySide6.QtWidgets import QApplication
-                    mw = None
-                    for w in QApplication.topLevelWidgets():
-                        if hasattr(w, 'refresh_dashboard'):
-                            mw = w
-                            break
-                    if mw:
-                        mw.refresh_dashboard()
-                        mw.refresh_current_page("cylinder_track")
-                        mw.refresh_current_page("weekly_payments")
-                except Exception:
-                    pass
+                self._refresh_application_after_client_change()
 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to add client: {str(e)}")
@@ -548,19 +583,7 @@ class ClientsWidget(QWidget):
                     
                     QMessageBox.information(self, "Success", "Client updated successfully!")
                     self.load_clients()
-                    try:
-                        from PySide6.QtWidgets import QApplication
-                        mw = None
-                        for w in QApplication.topLevelWidgets():
-                            if hasattr(w, 'refresh_dashboard'):
-                                mw = w
-                                break
-                        if mw:
-                            mw.refresh_dashboard()
-                            mw.refresh_current_page("cylinder_track")
-                            mw.refresh_current_page("weekly_payments")
-                    except Exception:
-                        pass
+                    self._refresh_application_after_client_change()
                 else:
                     QMessageBox.warning(self, "Error", "Failed to update client.")
                     
@@ -717,17 +740,7 @@ Outstanding Balance: Rs. {client['balance']:,.2f}<br>
                 
                 QMessageBox.information(self, "Success", "Client deleted successfully!")
                 self.load_clients()
-                try:
-                    from PySide6.QtWidgets import QApplication
-                    mw = None
-                    for w in QApplication.topLevelWidgets():
-                        if hasattr(w, 'refresh_dashboard'):
-                            mw = w
-                            break
-                    if mw:
-                        mw.refresh_dashboard()
-                except Exception:
-                    pass
+                self._refresh_application_after_client_change()
                 
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to delete client: {str(e)}")

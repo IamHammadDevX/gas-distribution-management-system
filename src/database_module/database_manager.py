@@ -1357,87 +1357,88 @@ class DatabaseManager:
         Pending = Delivered - Returned
         Returns: list of dict with gas_type, sub_type, capacity, delivered, returned, pending.
         """
-        prods = self.get_all_company_products()
-        keys = [(p['gas_type'], p['sub_type'], p['capacity']) for p in prods]
+        def group_cap(gas_type: str, capacity: str) -> str:
+            if gas_type == 'LPG' and capacity in ('12kg', '15kg'):
+                return '12/15kg'
+            return capacity
+
+        product_rows = self.get_all_company_products()
+        keys = {(p['gas_type'], group_cap(p['gas_type'], p['capacity'])) for p in product_rows}
 
         init_rows = self.execute_query(
             '''
-            SELECT gas_type, COALESCE(sub_type,'') AS sub_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            SELECT gas_type,
+                   CASE WHEN gas_type = 'LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
+                   COALESCE(SUM(quantity), 0) AS qty
             FROM client_initial_outstanding
             WHERE client_id = ?
-            GROUP BY gas_type, COALESCE(sub_type,''), capacity
+            GROUP BY gas_type, cap_group
             ''',
             (client_id,)
         )
-        init_map = {(r['gas_type'], r.get('sub_type') or '', r['capacity']): int(r['qty']) for r in init_rows}
+        init_map = {(r['gas_type'], r['cap_group']): int(r['qty']) for r in init_rows}
 
-        sale_items = self.execute_query(
+        delivered_items = self.execute_query(
             '''
-            SELECT gp.gas_type, gp.sub_type, gp.capacity, COALESCE(SUM(si.quantity),0) AS qty
+            SELECT gp.gas_type,
+                   CASE WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END AS cap_group,
+                   COALESCE(SUM(si.quantity), 0) AS qty
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.id
             JOIN gas_products gp ON si.gas_product_id = gp.id
             WHERE s.client_id = ?
-            GROUP BY gp.gas_type, gp.sub_type, gp.capacity
+            GROUP BY gp.gas_type, cap_group
             ''',
             (client_id,)
         )
-        delivered_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in sale_items}
-        sales_single = self.execute_query(
+        delivered_map = {(r['gas_type'], r['cap_group']): int(r['qty']) for r in delivered_items}
+
+        delivered_single = self.execute_query(
             '''
-            SELECT gp.gas_type, gp.sub_type, gp.capacity, COALESCE(SUM(s.quantity),0) AS qty
+            SELECT gp.gas_type,
+                   CASE WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END AS cap_group,
+                   COALESCE(SUM(s.quantity), 0) AS qty
             FROM sales s
             LEFT JOIN sale_items si ON si.sale_id = s.id
             JOIN gas_products gp ON s.gas_product_id = gp.id
             WHERE s.client_id = ? AND si.id IS NULL
-            GROUP BY gp.gas_type, gp.sub_type, gp.capacity
+            GROUP BY gp.gas_type, cap_group
             ''',
             (client_id,)
         )
-        for x in sales_single:
-            key = (x['gas_type'], x['sub_type'], x['capacity'])
-            delivered_map[key] = delivered_map.get(key, 0) + int(x['qty'])
+        for r in delivered_single:
+            k = (r['gas_type'], r['cap_group'])
+            delivered_map[k] = delivered_map.get(k, 0) + int(r['qty'])
 
-        returns = self.execute_query(
+        return_rows = self.execute_query(
             '''
-            SELECT gas_type, sub_type, capacity, COALESCE(SUM(quantity),0) AS qty
+            SELECT gas_type,
+                   CASE WHEN gas_type = 'LPG' AND capacity IN ('12kg','15kg') THEN '12/15kg' ELSE capacity END AS cap_group,
+                   COALESCE(SUM(quantity), 0) AS qty
             FROM cylinder_returns
             WHERE client_id = ?
-            GROUP BY gas_type, sub_type, capacity
+            GROUP BY gas_type, cap_group
             ''',
             (client_id,)
         )
-        returned_map = {(x['gas_type'], x['sub_type'], x['capacity']): int(x['qty']) for x in returns}
+        returned_map = {(r['gas_type'], r['cap_group']): int(r['qty']) for r in return_rows}
 
-        def group_cap(g, c):
-            if g == 'LPG' and c in ('12kg', '15kg'):
-                return '12/15kg'
-            return c
+        keys.update(init_map.keys())
+        keys.update(delivered_map.keys())
+        keys.update(returned_map.keys())
 
-        group_data = {}
-        for (gas_type, sub_type, cap) in keys:
-            gcap = group_cap(gas_type, cap)
-            delivered = delivered_map.get((gas_type, sub_type, cap), 0)
-            delivered += init_map.get((gas_type, sub_type or '', cap), 0)
-            returned = returned_map.get((gas_type, sub_type, cap), 0)
-            key = (gas_type, sub_type, gcap)
-            agg = group_data.get(key)
-            if not agg:
-                group_data[key] = {'delivered': delivered, 'returned': returned}
-            else:
-                agg['delivered'] += delivered
-                agg['returned'] += returned
-
-        rows = []
-        for (gas_type, sub_type, cap_group), vals in group_data.items():
-            pending = max(0, int(vals['delivered']) - int(vals['returned']))
+        rows: List[Dict[str, Any]] = []
+        for gas_type, cap_group in sorted(keys, key=lambda x: (x[0], x[1])):
+            delivered = int(delivered_map.get((gas_type, cap_group), 0)) + int(init_map.get((gas_type, cap_group), 0))
+            returned = int(returned_map.get((gas_type, cap_group), 0))
+            pending = max(0, delivered - returned)
             rows.append({
                 'gas_type': gas_type,
-                'sub_type': sub_type,
+                'sub_type': '',
                 'capacity': cap_group,
-                'delivered': int(vals['delivered']),
-                'returned': int(vals['returned']),
-                'pending': pending
+                'delivered': delivered,
+                'returned': returned,
+                'pending': pending,
             })
         return rows
 
