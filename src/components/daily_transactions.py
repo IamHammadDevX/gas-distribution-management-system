@@ -79,10 +79,13 @@ class DailyTransactionsWidget(QWidget):
 
         self.count_label = QLabel("Transactions: 0")
         self.total_label = QLabel("Total Sales: Rs. 0.00")
+        self.refill_label = QLabel("LPG Refills: 0")
         self.total_label.setStyleSheet("font-weight: 700; color: #1f4f82;")
         bar.addWidget(self.count_label)
         bar.addSpacing(8)
         bar.addWidget(self.total_label)
+        bar.addSpacing(8)
+        bar.addWidget(self.refill_label)
 
         layout.addWidget(controls_card)
 
@@ -97,11 +100,26 @@ class DailyTransactionsWidget(QWidget):
         sales_layout.addWidget(sales_title)
 
         self.sales_table = QTableWidget()
-        self.sales_table.setColumnCount(8)
-        self.sales_table.setHorizontalHeaderLabels(["Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Cashier"])
+        self.sales_table.setColumnCount(9)
+        self.sales_table.setHorizontalHeaderLabels(["Date", "Client", "Products", "Sources", "Quantities", "Total", "Paid", "Balance", "Cashier"])
         self._setup_table()
         sales_layout.addWidget(self.sales_table)
         layout.addWidget(sales_card, 1)
+
+        refill_card = QFrame()
+        refill_card.setObjectName("sectionCard")
+        refill_layout = QVBoxLayout(refill_card)
+        refill_layout.setContentsMargins(10, 10, 10, 10)
+        refill_layout.setSpacing(8)
+        refill_title = QLabel("LPG Refills")
+        refill_title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        refill_layout.addWidget(refill_title)
+        self.refill_table = QTableWidget()
+        self.refill_table.setColumnCount(7)
+        self.refill_table.setHorizontalHeaderLabels(["Time", "Client", "Supplier", "Capacity", "Quantity", "Amount", "Notes"])
+        self._setup_refill_table()
+        refill_layout.addWidget(self.refill_table)
+        layout.addWidget(refill_card, 1)
 
     def _make_small_button(self, text: str, kind: str = "secondary"):
         button = QPushButton(text)
@@ -141,15 +159,34 @@ class DailyTransactionsWidget(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
+
+    def _setup_refill_table(self):
+        self.refill_table.setAlternatingRowColors(True)
+        self.refill_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.refill_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.refill_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.refill_table.verticalHeader().setVisible(False)
+        self.refill_table.verticalHeader().setDefaultSectionSize(34)
+        header = self.refill_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.Stretch)
 
     def load_transactions(self):
         d_str = self.date_edit.date().toString('yyyy-MM-dd')
         self.load_sales_for_date(d_str)
+        self.load_lpg_refills_for_date(d_str)
 
     def load_sales_for_date(self, day_str):
         try:
@@ -161,13 +198,14 @@ class DailyTransactionsWidget(QWidget):
                 client = r['client_name']
                 self.sales_table.setItem(i, 1, QTableWidgetItem(client))
                 self.sales_table.setItem(i, 2, QTableWidgetItem(r.get('product_summary') or ''))
-                self.sales_table.setItem(i, 3, QTableWidgetItem(r.get('quantities_summary') or str(r.get('quantity') or '')))
+                self.sales_table.setItem(i, 3, QTableWidgetItem(r.get('source_summary') or 'Company Stock'))
+                self.sales_table.setItem(i, 4, QTableWidgetItem(r.get('quantities_summary') or str(r.get('quantity') or '')))
                 total_item = QTableWidgetItem(f"Rs. {r['total_amount']:,.2f}")
                 total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.sales_table.setItem(i, 4, total_item)
+                self.sales_table.setItem(i, 5, total_item)
                 paid_item = QTableWidgetItem(f"Rs. {r['amount_paid']:,.2f}")
                 paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.sales_table.setItem(i, 5, paid_item)
+                self.sales_table.setItem(i, 6, paid_item)
                 bal_item = QTableWidgetItem(f"Rs. {r['balance']:,.2f}")
                 bal_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if r['balance'] > 0:
@@ -176,8 +214,8 @@ class DailyTransactionsWidget(QWidget):
                     bal_item.setForeground(Qt.darkYellow)
                 else:
                     bal_item.setForeground(Qt.darkGreen)
-                self.sales_table.setItem(i, 6, bal_item)
-                self.sales_table.setItem(i, 7, QTableWidgetItem(r['cashier_name']))
+                self.sales_table.setItem(i, 7, bal_item)
+                self.sales_table.setItem(i, 8, QTableWidgetItem(r['cashier_name']))
                 total_sales += float(r.get('total_amount') or 0)
                 self.sales_table.setRowHeight(i, 36)
 
@@ -185,6 +223,26 @@ class DailyTransactionsWidget(QWidget):
             self.total_label.setText(f"Total Sales: Rs. {total_sales:,.2f}")
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load daily transactions: {str(e)}")
+
+    def load_lpg_refills_for_date(self, day_str):
+        try:
+            rows = self.db_manager.get_lpg_refills_for_date(day_str)
+            self.refill_table.setRowCount(len(rows))
+            for i, row in enumerate(rows):
+                self.refill_table.setItem(i, 0, QTableWidgetItem(row['created_at'][11:16]))
+                self.refill_table.setItem(i, 1, QTableWidgetItem(row['client_name']))
+                self.refill_table.setItem(i, 2, QTableWidgetItem(row['supplier_name']))
+                self.refill_table.setItem(i, 3, QTableWidgetItem(row['capacity']))
+                qty_item = QTableWidgetItem(str(int(row['quantity'])))
+                qty_item.setTextAlignment(Qt.AlignCenter)
+                self.refill_table.setItem(i, 4, qty_item)
+                amount_item = QTableWidgetItem(f"Rs. {float(row['total_amount']):,.2f}")
+                amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.refill_table.setItem(i, 5, amount_item)
+                self.refill_table.setItem(i, 6, QTableWidgetItem(row.get('notes') or ''))
+            self.refill_label.setText(f"LPG Refills: {len(rows)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load LPG refills: {str(e)}")
 
     def print_daily_report(self):
         try:
@@ -224,12 +282,12 @@ class DailyTransactionsWidget(QWidget):
                         item = self.sales_table.item(i, j)
                         row.append(item.text() if item else "")
                     display_time = row[0][11:16] if len(row[0]) >= 16 else row[0]
-                    html.append(f"<tr><td>{display_time}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td></tr>")
+                    html.append(f"<tr><td>{display_time}</td><td>{row[1]}</td><td>{row[2]}<br/><span style='font-size:8px;color:#475569'>{row[3]}</span></td><td>{row[4]}</td><td>{row[5]}</td><td>{row[6]}</td><td>{row[7]}</td><td>{row[8]}</td></tr>")
 
                     try:
-                        total_sales += float((row[4] or "0").replace("Rs.", "").replace(",", "").strip())
-                        total_paid += float((row[5] or "0").replace("Rs.", "").replace(",", "").strip())
-                        total_balance += float((row[6] or "0").replace("Rs.", "").replace(",", "").strip())
+                        total_sales += float((row[5] or "0").replace("Rs.", "").replace(",", "").strip())
+                        total_paid += float((row[6] or "0").replace("Rs.", "").replace(",", "").strip())
+                        total_balance += float((row[7] or "0").replace("Rs.", "").replace(",", "").strip())
                     except Exception:
                         pass
 

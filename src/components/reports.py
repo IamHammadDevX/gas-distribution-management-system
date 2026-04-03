@@ -78,11 +78,15 @@ class ReportsWidget(QWidget):
         self.report_type_combo = QComboBox()
         self.report_type_combo.addItems([
             "Sales Report",
+            "Supplier Sales Summary",
+            "Supplier Fill Payment Summary",
             "Outstanding Balances",
             "Employee Report",
             "Gas Type Summary",
             "Client Summary",
-            "Pending Cylinder Summary by Client"
+            "Pending Cylinder Summary by Client",
+            "LPG Refill Report",
+            "LPG Khata Summary"
         ])
         self.report_type_combo.currentTextChanged.connect(self.on_report_type_changed)
         report_layout.addWidget(self.report_type_combo)
@@ -221,7 +225,7 @@ class ReportsWidget(QWidget):
     def on_report_type_changed(self, report_type):
         """Handle report type change"""
         # Enable/disable date range based on report type
-        if report_type in ["Outstanding Balances", "Client Summary", "Employee Report"]:
+        if report_type in ["Outstanding Balances", "Client Summary", "Employee Report", "LPG Khata Summary"]:
             self.from_date_edit.setEnabled(False)
             self.to_date_edit.setEnabled(False)
         else:
@@ -235,6 +239,10 @@ class ReportsWidget(QWidget):
         try:
             if report_type == "Sales Report":
                 self.generate_sales_report()
+            elif report_type == "Supplier Sales Summary":
+                self.generate_supplier_sales_summary()
+            elif report_type == "Supplier Fill Payment Summary":
+                self.generate_supplier_fill_payment_summary()
             elif report_type == "Outstanding Balances":
                 self.generate_outstanding_balances_report()
             elif report_type == "Employee Report":
@@ -245,6 +253,10 @@ class ReportsWidget(QWidget):
                 self.generate_client_summary()
             elif report_type == "Pending Cylinder Summary by Client":
                 self.generate_pending_cylinder_summary_report()
+            elif report_type == "LPG Refill Report":
+                self.generate_lpg_refill_report()
+            elif report_type == "LPG Khata Summary":
+                self.generate_lpg_khata_summary()
             
         except Exception as e:
             QMessageBox.critical(self, "Report Error", f"Failed to generate report: {str(e)}")
@@ -274,9 +286,9 @@ Number of Transactions: {len(sales)}
         self.summary_text.setPlainText(summary.strip())
         
         # Populate table
-        self.report_table.setColumnCount(8)
+        self.report_table.setColumnCount(9)
         self.report_table.setHorizontalHeaderLabels([
-            "Date", "Client", "Products", "Quantities", "Unit Price", "Subtotal", "Tax", "Total"
+            "Date", "Client", "Products", "Sources", "Quantities", "Unit Price", "Subtotal", "Tax", "Total"
         ])
         
         self.report_table.setRowCount(len(sales))
@@ -286,12 +298,82 @@ Number of Transactions: {len(sales)}
             self.report_table.setItem(row, 1, QTableWidgetItem(sale['client_name']))
             
             self.report_table.setItem(row, 2, QTableWidgetItem(sale.get('product_summary') or ''))
-            self.report_table.setItem(row, 3, QTableWidgetItem(sale.get('quantities_summary') or str(sale.get('quantity') or '')))
-            self.report_table.setItem(row, 4, QTableWidgetItem(f"Rs. {sale['unit_price']:,.2f}"))
-            self.report_table.setItem(row, 5, QTableWidgetItem(f"Rs. {sale['subtotal']:,.2f}"))
-            self.report_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['tax_amount']:,.2f}"))
-            self.report_table.setItem(row, 7, QTableWidgetItem(f"Rs. {sale['total_amount']:,.2f}"))
+            self.report_table.setItem(row, 3, QTableWidgetItem(sale.get('source_summary') or 'Company Stock'))
+            self.report_table.setItem(row, 4, QTableWidgetItem(sale.get('quantities_summary') or str(sale.get('quantity') or '')))
+            self.report_table.setItem(row, 5, QTableWidgetItem(f"Rs. {sale['unit_price']:,.2f}"))
+            self.report_table.setItem(row, 6, QTableWidgetItem(f"Rs. {sale['subtotal']:,.2f}"))
+            self.report_table.setItem(row, 7, QTableWidgetItem(f"Rs. {sale['tax_amount']:,.2f}"))
+            self.report_table.setItem(row, 8, QTableWidgetItem(f"Rs. {sale['total_amount']:,.2f}"))
         
+        self._apply_table_resize()
+
+    def generate_supplier_sales_summary(self):
+        from_date = self.from_date_edit.date().toPython()
+        to_date = self.to_date_edit.date().toPython()
+        rows = self.db_manager.get_supplier_sales_summary(from_date, to_date)
+        total_sales = sum(float(row['total_amount'] or 0) for row in rows)
+        total_paid = sum(float(row['allocated_paid'] or 0) for row in rows)
+        total_remaining = sum(float(row['remaining_amount'] or 0) for row in rows)
+        summary = f"""
+SUPPLIER SALES SUMMARY
+Period: {from_date} to {to_date}
+Suppliers / Sources: {len(rows)}
+Total Sales: Rs. {total_sales:,.2f}
+Allocated Paid: Rs. {total_paid:,.2f}
+Remaining: Rs. {total_remaining:,.2f}
+        """
+        self.summary_text.setPlainText(summary.strip())
+        self.report_table.setColumnCount(8)
+        self.report_table.setHorizontalHeaderLabels([
+            "Source", "Clients", "Transactions", "Quantity", "Subtotal", "Tax", "Total", "Remaining"
+        ])
+        self.report_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            self.report_table.setItem(row_idx, 0, QTableWidgetItem(row['supplier_name']))
+            self.report_table.setItem(row_idx, 1, QTableWidgetItem(str(int(row['client_count'] or 0))))
+            self.report_table.setItem(row_idx, 2, QTableWidgetItem(str(int(row['transaction_count'] or 0))))
+            self.report_table.setItem(row_idx, 3, QTableWidgetItem(str(int(row['total_quantity'] or 0))))
+            self.report_table.setItem(row_idx, 4, QTableWidgetItem(f"Rs. {float(row['subtotal'] or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 5, QTableWidgetItem(f"Rs. {float(row['tax_amount'] or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 6, QTableWidgetItem(f"Rs. {float(row['total_amount'] or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 7, QTableWidgetItem(f"Rs. {float(row['remaining_amount'] or 0):,.2f}"))
+        self._apply_table_resize()
+
+    def generate_supplier_fill_payment_summary(self):
+        from_date = self.from_date_edit.date().toPython()
+        to_date = self.to_date_edit.date().toPython()
+        rows = self.db_manager.get_supplier_fill_payment_summary(start_date=from_date, end_date=to_date)
+        total_fill = sum(float(row.get('fill_total') or 0) for row in rows)
+        total_paid = sum(float(row.get('total_paid') or 0) for row in rows)
+        total_remaining = sum(float(row.get('remaining_amount') or 0) for row in rows)
+        summary = f"""
+SUPPLIER FILL PAYMENT SUMMARY
+Period: {from_date} to {to_date}
+Suppliers: {len(rows)}
+Total Fill Cost: Rs. {total_fill:,.2f}
+Total Paid: Rs. {total_paid:,.2f}
+Remaining Supplier Balance: Rs. {total_remaining:,.2f}
+        """
+        self.summary_text.setPlainText(summary.strip())
+        self.report_table.setColumnCount(8)
+        self.report_table.setHorizontalHeaderLabels([
+            "Supplier", "Cylinders", "Other Gas Fill", "LPG Fill", "Fill Cost", "Paid", "Remaining", "Last Payment"
+        ])
+        self.report_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            self.report_table.setItem(row_idx, 0, QTableWidgetItem(row.get('supplier_name') or ''))
+            self.report_table.setItem(row_idx, 1, QTableWidgetItem(str(int(row.get('total_cylinders') or 0))))
+            self.report_table.setItem(row_idx, 2, QTableWidgetItem(f"Rs. {float(row.get('other_gas_total') or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 3, QTableWidgetItem(f"Rs. {float(row.get('lpg_refill_total') or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 4, QTableWidgetItem(f"Rs. {float(row.get('fill_total') or 0):,.2f}"))
+            self.report_table.setItem(row_idx, 5, QTableWidgetItem(f"Rs. {float(row.get('total_paid') or 0):,.2f}"))
+            remaining_item = QTableWidgetItem(f"Rs. {float(row.get('remaining_amount') or 0):,.2f}")
+            if float(row.get('remaining_amount') or 0) > 0:
+                remaining_item.setForeground(Qt.red)
+            else:
+                remaining_item.setForeground(Qt.darkGreen)
+            self.report_table.setItem(row_idx, 6, remaining_item)
+            self.report_table.setItem(row_idx, 7, QTableWidgetItem(str(row.get('last_payment_date') or '')))
         self._apply_table_resize()
     
     def generate_outstanding_balances_report(self):
@@ -502,6 +584,63 @@ Clients with Pending Cylinders: {with_pending}
             if int(r['pending_cylinders']) > 0:
                 item.setForeground(Qt.red)
             self.report_table.setItem(i, 3, item)
+        self._apply_table_resize()
+
+    def generate_lpg_refill_report(self):
+        from_date = self.from_date_edit.date().toPython()
+        to_date = self.to_date_edit.date().toPython()
+        rows = self.db_manager.get_lpg_refill_report(from_date, to_date)
+        total_qty = sum(int(row['total_quantity'] or 0) for row in rows)
+        total_amount = sum(float(row['total_amount'] or 0) for row in rows)
+        summary = f"""
+LPG REFILL REPORT
+Period: {from_date} to {to_date}
+Entries: {len(rows)}
+Total Refilled Cylinders: {total_qty}
+Total Refill Amount: Rs. {total_amount:,.2f}
+        """
+        self.summary_text.setPlainText(summary.strip())
+        self.report_table.setColumnCount(6)
+        self.report_table.setHorizontalHeaderLabels([
+            "Client", "Phone", "Supplier", "Capacity", "Quantity", "Amount"
+        ])
+        self.report_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            self.report_table.setItem(row_idx, 0, QTableWidgetItem(row['client_name']))
+            self.report_table.setItem(row_idx, 1, QTableWidgetItem(row['client_phone']))
+            self.report_table.setItem(row_idx, 2, QTableWidgetItem(row['supplier_name']))
+            self.report_table.setItem(row_idx, 3, QTableWidgetItem(row['capacity']))
+            self.report_table.setItem(row_idx, 4, QTableWidgetItem(str(int(row['total_quantity'] or 0))))
+            self.report_table.setItem(row_idx, 5, QTableWidgetItem(f"Rs. {float(row['total_amount'] or 0):,.2f}"))
+        self._apply_table_resize()
+
+    def generate_lpg_khata_summary(self):
+        rows = self.db_manager.get_lpg_khata_summary()
+        total_pending = sum(int(row['pending_client'] or 0) for row in rows)
+        total_refilled = sum(int(row['refilled'] or 0) for row in rows)
+        total_empty_balance = sum(int(row['empty_balance'] or 0) for row in rows)
+        summary = f"""
+LPG KHATA SUMMARY
+Clients / Rows: {len(rows)}
+Pending With Client: {total_pending}
+Refilled: {total_refilled}
+Empty Balance: {total_empty_balance}
+        """
+        self.summary_text.setPlainText(summary.strip())
+        self.report_table.setColumnCount(8)
+        self.report_table.setHorizontalHeaderLabels([
+            "Client", "Phone", "Company", "Capacity", "Delivered", "Returned", "Refilled", "Empty Balance"
+        ])
+        self.report_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            self.report_table.setItem(row_idx, 0, QTableWidgetItem(row['client_name']))
+            self.report_table.setItem(row_idx, 1, QTableWidgetItem(row['phone']))
+            self.report_table.setItem(row_idx, 2, QTableWidgetItem(row['company']))
+            self.report_table.setItem(row_idx, 3, QTableWidgetItem(row['capacity']))
+            self.report_table.setItem(row_idx, 4, QTableWidgetItem(str(int(row['delivered'] or 0))))
+            self.report_table.setItem(row_idx, 5, QTableWidgetItem(str(int(row['returned'] or 0))))
+            self.report_table.setItem(row_idx, 6, QTableWidgetItem(str(int(row['refilled'] or 0))))
+            self.report_table.setItem(row_idx, 7, QTableWidgetItem(str(int(row['empty_balance'] or 0))))
         self._apply_table_resize()
     
     def export_csv(self):

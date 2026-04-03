@@ -169,6 +169,18 @@ class DatabaseManager:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                phone TEXT,
+                address TEXT,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS gas_products (
                 id BIGSERIAL PRIMARY KEY,
                 gas_type TEXT NOT NULL,
@@ -201,6 +213,9 @@ class DatabaseManager:
                 id BIGSERIAL PRIMARY KEY,
                 sale_id BIGINT NOT NULL REFERENCES sales(id),
                 gas_product_id BIGINT NOT NULL REFERENCES gas_products(id),
+                supplier_id BIGINT REFERENCES suppliers(id),
+                fill_unit_cost DECIMAL(10,2) DEFAULT 0,
+                fill_total DECIMAL(10,2) DEFAULT 0,
                 quantity INTEGER NOT NULL,
                 unit_price DECIMAL(10,2) NOT NULL,
                 subtotal DECIMAL(10,2) NOT NULL,
@@ -332,7 +347,34 @@ class DatabaseManager:
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS lpg_refills (
+                id BIGSERIAL PRIMARY KEY,
+                client_id BIGINT NOT NULL REFERENCES clients(id),
+                gas_product_id BIGINT NOT NULL REFERENCES gas_products(id),
+                supplier_id BIGINT REFERENCES suppliers(id),
+                quantity INTEGER NOT NULL,
+                unit_price DECIMAL(10,2) DEFAULT 0,
+                total_amount DECIMAL(10,2) DEFAULT 0,
+                notes TEXT,
+                created_by BIGINT REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS supplier_fill_payments (
+                id BIGSERIAL PRIMARY KEY,
+                supplier_id BIGINT NOT NULL REFERENCES suppliers(id),
+                amount DECIMAL(10,2) NOT NULL,
+                payment_date DATE NOT NULL,
+                payment_method TEXT,
+                notes TEXT,
+                created_by BIGINT REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)",
+            "CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers (name)",
             "CREATE INDEX IF NOT EXISTS idx_sales_client_id ON sales (client_id)",
             "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_receipts_receipt_number ON receipts (receipt_number)",
@@ -358,6 +400,9 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_stock_movements_product_type_time ON cylinder_stock_movements (gas_product_id, movement_type, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_stock_movements_client_time ON cylinder_stock_movements (client_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_created_at ON weekly_invoices (created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_lpg_refills_client_created ON lpg_refills (client_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_lpg_refills_product_created ON lpg_refills (gas_product_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_supplier_fill_payments_supplier_date ON supplier_fill_payments (supplier_id, payment_date)",
             "CREATE INDEX IF NOT EXISTS idx_weekly_invoices_receipt_number ON weekly_invoices (receipt_number)",
             "CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1 INCREMENT BY 1",
             "CREATE SEQUENCE IF NOT EXISTS weekly_invoice_number_seq START WITH 1 INCREMENT BY 1",
@@ -370,6 +415,19 @@ class DatabaseManager:
                     for ddl in ddl_statements:
                         cur.execute(ddl)
                     cur.execute("ALTER TABLE client_initial_outstanding ADD COLUMN IF NOT EXISTS sub_type TEXT")
+                    cur.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+                    cur.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
+                    cur.execute("ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES suppliers(id)")
+                    cur.execute("ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS fill_unit_cost DECIMAL(10,2) DEFAULT 0")
+                    cur.execute("ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS fill_total DECIMAL(10,2) DEFAULT 0")
+                    cur.execute("ALTER TABLE lpg_refills ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES suppliers(id)")
+                    cur.execute("ALTER TABLE lpg_refills ADD COLUMN IF NOT EXISTS unit_price DECIMAL(10,2) DEFAULT 0")
+                    cur.execute("ALTER TABLE lpg_refills ADD COLUMN IF NOT EXISTS total_amount DECIMAL(10,2) DEFAULT 0")
+                    cur.execute("ALTER TABLE lpg_refills ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_supplier_id ON sale_items (supplier_id)")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_fill_total ON sale_items (fill_total)")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_lpg_refills_supplier_created ON lpg_refills (supplier_id, created_at)")
                     cur.execute("DROP TABLE IF EXISTS gate_passes")
                     cur.execute("DROP TABLE IF EXISTS vehicle_expenses")
                     cur.execute('''
@@ -506,6 +564,63 @@ class DatabaseManager:
         query = 'SELECT * FROM clients WHERE id = ?'
         clients = self.execute_query(query, (client_id,))
         return clients[0] if clients else None
+
+    def get_suppliers(self, search_term: str = "", active_only: bool = True) -> List[Dict]:
+        params: List[Any] = []
+        where_parts: List[str] = []
+        if active_only:
+            where_parts.append("is_active = TRUE")
+        if search_term:
+            like = f"%{search_term.strip()}%"
+            where_parts.append(
+                "(LOWER(COALESCE(name, '')) LIKE LOWER(?) OR LOWER(COALESCE(phone, '')) LIKE LOWER(?) OR LOWER(COALESCE(address, '')) LIKE LOWER(?))"
+            )
+            params.extend([like, like, like])
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        return self.execute_query(
+            f'''
+            SELECT *
+            FROM suppliers
+            {where}
+            ORDER BY name
+            ''',
+            tuple(params),
+        )
+
+    def get_supplier_by_id(self, supplier_id: int) -> Optional[Dict]:
+        rows = self.execute_query('SELECT * FROM suppliers WHERE id = ?', (supplier_id,))
+        return rows[0] if rows else None
+
+    def add_supplier(self, name: str, phone: str = "", address: str = "", notes: str = "") -> int:
+        return self.execute_update(
+            '''
+            INSERT INTO suppliers (name, phone, address, notes)
+            VALUES (?, ?, ?, ?)
+            ''',
+            (name.strip(), phone.strip(), address.strip(), notes.strip()),
+        )
+
+    def update_supplier(self, supplier_id: int, name: str, phone: str = "", address: str = "", notes: str = "", is_active: bool = True) -> bool:
+        updated = self.execute_update(
+            '''
+            UPDATE suppliers
+            SET name = ?, phone = ?, address = ?, notes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (name.strip(), phone.strip(), address.strip(), notes.strip(), bool(is_active), supplier_id),
+        )
+        return updated > 0
+
+    def deactivate_supplier(self, supplier_id: int) -> bool:
+        updated = self.execute_update(
+            '''
+            UPDATE suppliers
+            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (supplier_id,),
+        )
+        return updated > 0
     
     def add_client(self, name: str, phone: str, address: str = "", company: str = "", initial_previous_balance: float = 0.0) -> int:
         query = '''
@@ -577,6 +692,130 @@ class DatabaseManager:
                                             subtotal, tax_amount, total_amount, amount_paid, balance, created_by))
         self.update_client_balance(client_id)
         return sale_id
+
+    def create_sale_with_receipt(
+        self,
+        client_id: int,
+        items: List[Dict[str, Any]],
+        total_subtotal: float,
+        total_tax: float,
+        total_amount: float,
+        amount_paid: float,
+        balance: float,
+        created_by: int,
+        receipt_number: str,
+    ) -> Dict[str, Any]:
+        if not items:
+            raise ValueError("At least one sale item is required.")
+
+        header_item = items[0]
+        with self.transaction() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    '''
+                    INSERT INTO sales (client_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount, amount_paid, balance, created_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    ''',
+                    (
+                        client_id,
+                        header_item['gas_product_id'],
+                        int(header_item['quantity']),
+                        float(header_item['unit_price']),
+                        float(total_subtotal),
+                        float(total_tax),
+                        float(total_amount),
+                        float(amount_paid),
+                        float(balance),
+                        created_by,
+                    ),
+                )
+                sale_row = cur.fetchone()
+                sale_id = int(sale_row['id'])
+
+                for item in items:
+                    cur.execute(
+                        '''
+                        INSERT INTO sale_items (sale_id, gas_product_id, supplier_id, fill_unit_cost, fill_total, quantity, unit_price, subtotal, tax_amount, total_amount)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ''',
+                        (
+                            sale_id,
+                            item['gas_product_id'],
+                            item.get('supplier_id'),
+                            float(item.get('fill_unit_cost') or 0),
+                            float(item.get('fill_total') or 0),
+                            int(item['quantity']),
+                            float(item['unit_price']),
+                            float(item['subtotal']),
+                            float(item['tax_amount']),
+                            float(item['total_amount']),
+                        ),
+                    )
+                    qty = int(item['quantity'])
+                    gas_product_id = int(item['gas_product_id'])
+                    if qty > 0:
+                        cur.execute(
+                            '''
+                            INSERT INTO cylinder_inventory (gas_product_id, opening_count, sold_count, returned_count, available_count)
+                            VALUES (%s, 0, 0, 0, 0)
+                            ON CONFLICT (gas_product_id) DO NOTHING
+                            ''',
+                            (gas_product_id,),
+                        )
+                        cur.execute(
+                            '''
+                            UPDATE cylinder_inventory
+                            SET sold_count = sold_count + %s,
+                                available_count = available_count - %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE gas_product_id = %s
+                            ''',
+                            (qty, qty, gas_product_id),
+                        )
+                        cur.execute(
+                            '''
+                            INSERT INTO cylinder_stock_movements
+                                (gas_product_id, movement_type, quantity, reference_type, reference_id, client_id, created_by)
+                            VALUES (%s, 'SALE_OUT', %s, 'SALE', %s, %s, %s)
+                            ''',
+                            (gas_product_id, qty, sale_id, client_id, created_by),
+                        )
+
+                cur.execute(
+                    '''
+                    INSERT INTO receipts (receipt_number, sale_id, client_id, total_amount, amount_paid, balance, created_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    ''',
+                    (
+                        receipt_number,
+                        sale_id,
+                        client_id,
+                        float(total_amount),
+                        float(amount_paid),
+                        float(balance),
+                        created_by,
+                    ),
+                )
+                receipt_row = cur.fetchone()
+
+                cur.execute(
+                    '''
+                    UPDATE clients
+                    SET total_purchases = COALESCE((SELECT SUM(total_amount) FROM sales WHERE client_id = %s), 0),
+                        total_paid = COALESCE((SELECT SUM(amount_paid) FROM sales WHERE client_id = %s), 0),
+                        balance = COALESCE((SELECT SUM(balance) FROM sales WHERE client_id = %s), 0) + COALESCE(initial_previous_balance, 0),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    ''',
+                    (client_id, client_id, client_id, client_id),
+                )
+        return {
+            'sale_id': sale_id,
+            'receipt_id': int(receipt_row['id']),
+            'receipt_number': receipt_number,
+        }
 
     def get_product_available_count(self, gas_product_id: int) -> int:
         rows = self.execute_query('''
@@ -703,12 +942,13 @@ class DatabaseManager:
         }
 
     def add_sale_item(self, sale_id: int, gas_product_id: int, quantity: int, unit_price: float,
-                      subtotal: float, tax_amount: float, total_amount: float) -> int:
+                      subtotal: float, tax_amount: float, total_amount: float, supplier_id: Optional[int] = None,
+                      fill_unit_cost: float = 0.0, fill_total: float = 0.0) -> int:
         query = '''
-            INSERT INTO sale_items (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sale_items (sale_id, gas_product_id, supplier_id, fill_unit_cost, fill_total, quantity, unit_price, subtotal, tax_amount, total_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
-        item_id = self.execute_update(query, (sale_id, gas_product_id, quantity, unit_price, subtotal, tax_amount, total_amount))
+        item_id = self.execute_update(query, (sale_id, gas_product_id, supplier_id, fill_unit_cost, fill_total, quantity, unit_price, subtotal, tax_amount, total_amount))
         sale_rows = self.execute_query('SELECT client_id, created_by FROM sales WHERE id = ?', (sale_id,))
         client_id = sale_rows[0]['client_id'] if sale_rows else None
         created_by = sale_rows[0].get('created_by') if sale_rows else None
@@ -770,9 +1010,13 @@ class DatabaseManager:
     def get_sale_items(self, sale_id: int) -> List[Dict]:
         items = self.execute_query('''
             SELECT si.created_at, si.quantity, si.unit_price, si.total_amount, si.subtotal, si.tax_amount,
-                   gp.gas_type, gp.sub_type, gp.capacity
+                   COALESCE(si.fill_unit_cost, 0) AS fill_unit_cost,
+                   COALESCE(si.fill_total, 0) AS fill_total,
+                   gp.gas_type, gp.sub_type, gp.capacity,
+                   COALESCE(sp.name, 'Company Stock') AS supplier_name
             FROM sale_items si
             JOIN gas_products gp ON si.gas_product_id = gp.id
+            LEFT JOIN suppliers sp ON si.supplier_id = sp.id
             WHERE si.sale_id = ?
             ORDER BY si.id
         ''', (sale_id,))
@@ -781,7 +1025,10 @@ class DatabaseManager:
         # Fallback to single-line sale if no sale_items exist
         return self.execute_query('''
             SELECT s.created_at, s.quantity, s.unit_price, s.total_amount, s.subtotal, s.tax_amount,
-                   gp.gas_type, gp.sub_type, gp.capacity
+                   0 AS fill_unit_cost,
+                   0 AS fill_total,
+                   gp.gas_type, gp.sub_type, gp.capacity,
+                   'Company Stock' AS supplier_name
             FROM sales s
             JOIN gas_products gp ON s.gas_product_id = gp.id
             WHERE s.id = ?
@@ -805,11 +1052,17 @@ class DatabaseManager:
                     SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                     FROM sale_items si2
                     WHERE si2.sale_id = s.id
-                ) AS quantities_summary
+                ) AS quantities_summary,
+                (
+                    SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                    FROM sale_items si2
+                    LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                    WHERE si2.sale_id = s.id
+                ) AS source_summary
             FROM sales s
             WHERE s.id = ?
         ''', (sale_id,))
-        return row[0] if row else {'product_summary': '', 'quantities_summary': ''}
+        return row[0] if row else {'product_summary': '', 'quantities_summary': '', 'source_summary': ''}
 
     def get_receipts_with_summaries(self, limit: int = 100, search: Optional[str] = None) -> List[Dict]:
         params: tuple = ()
@@ -836,7 +1089,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = r.sale_id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = r.sale_id
+                   ) AS source_summary
             FROM receipts r
             JOIN clients c ON r.client_id = c.id
             JOIN sales s ON r.sale_id = s.id
@@ -865,7 +1124,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = r.sale_id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = r.sale_id
+                   ) AS source_summary
             FROM receipts r
             JOIN clients c ON r.client_id = c.id
             JOIN sales s ON r.sale_id = s.id
@@ -1152,7 +1417,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = s.id
+                   ) AS source_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
             ORDER BY s.created_at DESC
@@ -1190,7 +1461,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = s.id
+                   ) AS source_summary
             FROM sales s
             WHERE s.client_id = ?
             ORDER BY s.created_at DESC
@@ -1216,7 +1493,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = s.id
+                   ) AS source_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
             JOIN users u ON s.created_by = u.id
@@ -1319,7 +1602,13 @@ class DatabaseManager:
                        SELECT string_agg(si2.quantity::text, ', ' ORDER BY si2.id)
                        FROM sale_items si2
                        WHERE si2.sale_id = s.id
-                   ) AS quantities_summary
+                   ) AS quantities_summary,
+                   (
+                       SELECT string_agg(DISTINCT COALESCE(sp.name, 'Company Stock'), ', ' ORDER BY COALESCE(sp.name, 'Company Stock'))
+                       FROM sale_items si2
+                       LEFT JOIN suppliers sp ON si2.supplier_id = sp.id
+                       WHERE si2.sale_id = s.id
+                   ) AS source_summary
             FROM sales s
             JOIN clients c ON s.client_id = c.id
                         WHERE s.created_at >= (?::date)
@@ -1336,7 +1625,479 @@ class DatabaseManager:
             ORDER BY balance DESC
         '''
         return self.execute_query(query)
-    
+
+    def get_supplier_sales_summary(self, start_date: date, end_date: date, supplier_id: Optional[int] = None) -> List[Dict]:
+        params: List[Any] = [start_date, end_date, start_date, end_date]
+        supplier_where = ""
+        if supplier_id is not None:
+            supplier_where = "WHERE supplier_key = ?"
+            params.append(int(supplier_id))
+        return self.execute_query(
+            f'''
+            WITH itemized AS (
+                SELECT
+                    s.id AS sale_id,
+                    s.client_id,
+                    s.amount_paid,
+                    COALESCE(si.supplier_id, 0) AS supplier_key,
+                    COALESCE(sp.name, 'Company Stock') AS supplier_name,
+                    si.quantity AS quantity,
+                    si.subtotal AS subtotal,
+                    si.tax_amount AS tax_amount,
+                    si.total_amount AS total_amount
+                FROM sales s
+                JOIN sale_items si ON si.sale_id = s.id
+                LEFT JOIN suppliers sp ON si.supplier_id = sp.id
+                WHERE s.created_at >= (?::date)
+                  AND s.created_at < (?::date + INTERVAL '1 day')
+                UNION ALL
+                SELECT
+                    s.id AS sale_id,
+                    s.client_id,
+                    s.amount_paid,
+                    0 AS supplier_key,
+                    'Company Stock' AS supplier_name,
+                    s.quantity AS quantity,
+                    s.subtotal AS subtotal,
+                    s.tax_amount AS tax_amount,
+                    s.total_amount AS total_amount
+                FROM sales s
+                LEFT JOIN sale_items si_chk ON si_chk.sale_id = s.id
+                WHERE si_chk.id IS NULL
+                  AND s.created_at >= (?::date)
+                  AND s.created_at < (?::date + INTERVAL '1 day')
+            ),
+            sale_totals AS (
+                SELECT sale_id, COALESCE(SUM(total_amount), 0) AS sale_total
+                FROM itemized
+                GROUP BY sale_id
+            )
+            SELECT
+                supplier_key,
+                supplier_name,
+                COUNT(DISTINCT sale_id) AS transaction_count,
+                COUNT(DISTINCT client_id) AS client_count,
+                COALESCE(SUM(quantity), 0) AS total_quantity,
+                COALESCE(SUM(subtotal), 0) AS subtotal,
+                COALESCE(SUM(tax_amount), 0) AS tax_amount,
+                COALESCE(SUM(total_amount), 0) AS total_amount,
+                COALESCE(SUM(CASE WHEN st.sale_total > 0 THEN itemized.amount_paid * itemized.total_amount / st.sale_total ELSE 0 END), 0) AS allocated_paid,
+                COALESCE(SUM(itemized.total_amount), 0) - COALESCE(SUM(CASE WHEN st.sale_total > 0 THEN itemized.amount_paid * itemized.total_amount / st.sale_total ELSE 0 END), 0) AS remaining_amount
+            FROM itemized
+            JOIN sale_totals st ON st.sale_id = itemized.sale_id
+            {supplier_where}
+            GROUP BY supplier_key, supplier_name
+            ORDER BY supplier_name
+            ''',
+            tuple(params),
+        )
+
+    def get_supplier_fill_entries(self, supplier_id: Optional[int] = None, start_date: Optional[date] = None,
+                                  end_date: Optional[date] = None) -> List[Dict]:
+        entry_params: List[Any] = []
+        refill_params: List[Any] = []
+        entry_filters: List[str] = []
+        refill_filters: List[str] = []
+        if supplier_id is not None:
+            entry_filters.append("si.supplier_id = ?")
+            refill_filters.append("lr.supplier_id = ?")
+            entry_params.append(int(supplier_id))
+            refill_params.append(int(supplier_id))
+        if start_date is not None:
+            entry_filters.append("s.created_at >= (?::date)")
+            refill_filters.append("lr.created_at >= (?::date)")
+            entry_params.append(start_date)
+            refill_params.append(start_date)
+        if end_date is not None:
+            entry_filters.append("s.created_at < (?::date + INTERVAL '1 day')")
+            refill_filters.append("lr.created_at < (?::date + INTERVAL '1 day')")
+            entry_params.append(end_date)
+            refill_params.append(end_date)
+        entry_where = f"WHERE {' AND '.join(entry_filters)}" if entry_filters else ""
+        refill_where = f"WHERE {' AND '.join(refill_filters)}" if refill_filters else ""
+
+        return self.execute_query(
+            f'''
+            SELECT *
+            FROM (
+                SELECT
+                    'SALE_FILL' AS entry_type,
+                    si.id AS entry_id,
+                    s.created_at,
+                    si.supplier_id,
+                    sp.name AS supplier_name,
+                    s.client_id,
+                    c.name AS client_name,
+                    gp.gas_type,
+                    COALESCE(gp.sub_type, '') AS sub_type,
+                    gp.capacity,
+                    si.quantity,
+                    COALESCE(si.fill_unit_cost, 0) AS fill_unit_cost,
+                    COALESCE(si.fill_total, 0) AS fill_total,
+                    ('Sale #' || s.id::text) AS reference_no,
+                    '' AS notes
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
+                JOIN clients c ON s.client_id = c.id
+                JOIN gas_products gp ON si.gas_product_id = gp.id
+                JOIN suppliers sp ON si.supplier_id = sp.id
+                {entry_where}
+                UNION ALL
+                SELECT
+                    'LPG_REFILL' AS entry_type,
+                    lr.id AS entry_id,
+                    lr.created_at,
+                    lr.supplier_id,
+                    sp.name AS supplier_name,
+                    lr.client_id,
+                    c.name AS client_name,
+                    gp.gas_type,
+                    COALESCE(gp.sub_type, '') AS sub_type,
+                    gp.capacity,
+                    lr.quantity,
+                    COALESCE(lr.unit_price, 0) AS fill_unit_cost,
+                    COALESCE(lr.total_amount, 0) AS fill_total,
+                    ('Refill #' || lr.id::text) AS reference_no,
+                    COALESCE(lr.notes, '') AS notes
+                FROM lpg_refills lr
+                JOIN clients c ON lr.client_id = c.id
+                JOIN gas_products gp ON lr.gas_product_id = gp.id
+                JOIN suppliers sp ON lr.supplier_id = sp.id
+                {refill_where}
+            ) entries
+            ORDER BY created_at DESC, entry_id DESC
+            ''',
+            tuple(entry_params + refill_params),
+        )
+
+    def get_supplier_fill_payment_summary(self, start_date: Optional[date] = None, end_date: Optional[date] = None,
+                                          supplier_id: Optional[int] = None) -> List[Dict]:
+        entry_rows = self.get_supplier_fill_entries(supplier_id=supplier_id, start_date=start_date, end_date=end_date)
+        params: List[Any] = []
+        where_parts: List[str] = []
+        if supplier_id is not None:
+            where_parts.append("supplier_id = ?")
+            params.append(int(supplier_id))
+        if start_date is not None:
+            where_parts.append("payment_date >= ?")
+            params.append(start_date)
+        if end_date is not None:
+            where_parts.append("payment_date <= ?")
+            params.append(end_date)
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        payment_rows = self.execute_query(
+            f'''
+            SELECT supplier_id,
+                   COALESCE(SUM(amount), 0) AS total_paid,
+                   MAX(payment_date) AS last_payment_date
+            FROM supplier_fill_payments
+            {where}
+            GROUP BY supplier_id
+            ''',
+            tuple(params),
+        )
+        payments_map = {int(row['supplier_id']): row for row in payment_rows}
+
+        summary_map: Dict[int, Dict[str, Any]] = {}
+        for row in entry_rows:
+            sid = int(row['supplier_id'])
+            bucket = summary_map.setdefault(
+                sid,
+                {
+                    'supplier_id': sid,
+                    'supplier_name': row['supplier_name'],
+                    'total_entries': 0,
+                    'total_cylinders': 0,
+                    'fill_total': 0.0,
+                    'lpg_refill_total': 0.0,
+                    'other_gas_total': 0.0,
+                },
+            )
+            bucket['total_entries'] += 1
+            bucket['total_cylinders'] += int(row.get('quantity') or 0)
+            fill_total = float(row.get('fill_total') or 0)
+            bucket['fill_total'] += fill_total
+            if row.get('entry_type') == 'LPG_REFILL' or row.get('gas_type') == 'LPG':
+                bucket['lpg_refill_total'] += fill_total
+            else:
+                bucket['other_gas_total'] += fill_total
+
+        result: List[Dict[str, Any]] = []
+        for sid, bucket in summary_map.items():
+            pay = payments_map.get(sid, {})
+            total_paid = float(pay.get('total_paid') or 0)
+            bucket['total_paid'] = round(total_paid, 2)
+            bucket['remaining_amount'] = round(max(0.0, bucket['fill_total'] - total_paid), 2)
+            bucket['fill_total'] = round(bucket['fill_total'], 2)
+            bucket['lpg_refill_total'] = round(bucket['lpg_refill_total'], 2)
+            bucket['other_gas_total'] = round(bucket['other_gas_total'], 2)
+            bucket['last_payment_date'] = pay.get('last_payment_date') or ''
+            result.append(bucket)
+
+        # Include suppliers with payments but no entries in the selected filter.
+        for sid, pay in payments_map.items():
+            if sid in summary_map:
+                continue
+            supplier = self.get_supplier_by_id(sid)
+            if not supplier:
+                continue
+            total_paid = float(pay.get('total_paid') or 0)
+            result.append(
+                {
+                    'supplier_id': sid,
+                    'supplier_name': supplier['name'],
+                    'total_entries': 0,
+                    'total_cylinders': 0,
+                    'fill_total': 0.0,
+                    'lpg_refill_total': 0.0,
+                    'other_gas_total': 0.0,
+                    'total_paid': round(total_paid, 2),
+                    'remaining_amount': round(max(0.0, -total_paid), 2),
+                    'last_payment_date': pay.get('last_payment_date') or '',
+                }
+            )
+
+        result.sort(key=lambda row: row['supplier_name'].lower())
+        return result
+
+    def get_supplier_fill_outstanding(self, supplier_id: int) -> float:
+        rows = self.get_supplier_fill_payment_summary(supplier_id=supplier_id)
+        if not rows:
+            return 0.0
+        return float(rows[0].get('remaining_amount') or 0.0)
+
+    def get_supplier_fill_payment_history(self, supplier_id: int) -> List[Dict]:
+        return self.execute_query(
+            '''
+            SELECT payment_date, amount, COALESCE(payment_method, '') AS payment_method,
+                   COALESCE(notes, '') AS notes, created_at
+            FROM supplier_fill_payments
+            WHERE supplier_id = ?
+            ORDER BY payment_date DESC, id DESC
+            ''',
+            (supplier_id,),
+        )
+
+    def record_supplier_fill_payment(self, supplier_id: int, amount: float, payment_date: str,
+                                     payment_method: Optional[str] = None, notes: str = "",
+                                     created_by: Optional[int] = None) -> int:
+        supplier = self.get_supplier_by_id(supplier_id)
+        if not supplier:
+            raise ValueError("Supplier not found.")
+        amt = float(amount or 0)
+        if amt <= 0:
+            raise ValueError("Payment amount must be greater than zero.")
+        outstanding = self.get_supplier_fill_outstanding(supplier_id)
+        if amt > outstanding + 0.01:
+            raise ValueError(f"Payment cannot exceed remaining supplier balance of Rs. {outstanding:,.2f}.")
+        pid = self.execute_update(
+            '''
+            INSERT INTO supplier_fill_payments (supplier_id, amount, payment_date, payment_method, notes, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''',
+            (supplier_id, amt, payment_date, payment_method, notes.strip(), created_by),
+        )
+        try:
+            self.log_activity(
+                'SUPPLIER_FILL_PAYMENT',
+                f"Recorded supplier payment Rs.{amt:,.2f} for {supplier['name']}",
+                created_by,
+            )
+        except Exception:
+            pass
+        return pid
+
+    def get_weekly_supplier_breakdown(self, client_id: int, week_start: str, week_end: str) -> List[Dict]:
+        return self.execute_query(
+            '''
+            WITH itemized AS (
+                SELECT
+                    COALESCE(si.supplier_id, 0) AS supplier_key,
+                    COALESCE(sp.name, 'Company Stock') AS supplier_name,
+                    si.quantity AS quantity,
+                    si.subtotal AS subtotal,
+                    si.tax_amount AS tax_amount,
+                    si.total_amount AS total_amount
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
+                LEFT JOIN suppliers sp ON si.supplier_id = sp.id
+                WHERE s.client_id = ?
+                  AND s.created_at >= (?::date)
+                  AND s.created_at < (?::date + INTERVAL '1 day')
+                UNION ALL
+                SELECT
+                    0 AS supplier_key,
+                    'Company Stock' AS supplier_name,
+                    s.quantity AS quantity,
+                    s.subtotal AS subtotal,
+                    s.tax_amount AS tax_amount,
+                    s.total_amount AS total_amount
+                FROM sales s
+                LEFT JOIN sale_items si_chk ON si_chk.sale_id = s.id
+                WHERE si_chk.id IS NULL
+                  AND s.client_id = ?
+                  AND s.created_at >= (?::date)
+                  AND s.created_at < (?::date + INTERVAL '1 day')
+            )
+            SELECT
+                supplier_key,
+                supplier_name,
+                COALESCE(SUM(quantity), 0) AS total_quantity,
+                COALESCE(SUM(subtotal), 0) AS subtotal,
+                COALESCE(SUM(tax_amount), 0) AS tax_amount,
+                COALESCE(SUM(total_amount), 0) AS total_amount
+            FROM itemized
+            GROUP BY supplier_key, supplier_name
+            ORDER BY supplier_name
+            ''',
+            (client_id, week_start, week_end, client_id, week_start, week_end),
+        )
+
+    def get_weekly_supplier_breakdown_text(self, client_id: int, week_start: str, week_end: str) -> str:
+        rows = self.get_weekly_supplier_breakdown(client_id, week_start, week_end)
+        if not rows:
+            return "0"
+        return ", ".join(
+            f"{r['supplier_name']} ({int(r['total_quantity'])} cyl / Rs. {float(r['total_amount']):,.0f})"
+            for r in rows
+        )
+
+    def get_weekly_lpg_refill_breakdown(self, client_id: int, week_start: str, week_end: str) -> str:
+        rows = self.execute_query(
+            '''
+            SELECT string_agg(summary, ', ') AS result
+            FROM (
+                SELECT
+                    CASE
+                        WHEN gp.capacity = '12kg' THEN 'LPG 12'
+                        WHEN gp.capacity = '15kg' THEN 'LPG 15'
+                        ELSE 'LPG ' || COALESCE(gp.capacity, '')
+                    END || ' ' || SUM(lr.quantity)::text AS summary
+                FROM lpg_refills lr
+                JOIN gas_products gp ON lr.gas_product_id = gp.id
+                WHERE lr.client_id = ?
+                  AND lr.created_at >= (?::date)
+                  AND lr.created_at < (?::date + INTERVAL '1 day')
+                GROUP BY gp.capacity
+            ) x
+            ''',
+            (client_id, week_start, week_end),
+        )
+        return rows[0]['result'] if rows and rows[0]['result'] else "0"
+
+    def get_lpg_refills_for_date(self, day: str) -> List[Dict]:
+        return self.execute_query(
+            '''
+            SELECT
+                lr.created_at,
+                c.name AS client_name,
+                c.phone AS client_phone,
+                COALESCE(sp.name, 'Company Stock') AS supplier_name,
+                gp.capacity,
+                lr.quantity,
+                lr.unit_price,
+                lr.total_amount,
+                COALESCE(lr.notes, '') AS notes
+            FROM lpg_refills lr
+            JOIN clients c ON lr.client_id = c.id
+            JOIN gas_products gp ON lr.gas_product_id = gp.id
+            LEFT JOIN suppliers sp ON lr.supplier_id = sp.id
+            WHERE lr.created_at >= (?::date)
+              AND lr.created_at < (?::date + INTERVAL '1 day')
+            ORDER BY lr.created_at DESC
+            ''',
+            (day, day),
+        )
+
+    def get_lpg_refill_report(self, start_date: date, end_date: date) -> List[Dict]:
+        return self.execute_query(
+            '''
+            SELECT
+                c.name AS client_name,
+                c.phone AS client_phone,
+                COALESCE(sp.name, 'Company Stock') AS supplier_name,
+                gp.capacity,
+                COUNT(lr.id) AS entry_count,
+                COALESCE(SUM(lr.quantity), 0) AS total_quantity,
+                COALESCE(SUM(lr.total_amount), 0) AS total_amount
+            FROM lpg_refills lr
+            JOIN clients c ON lr.client_id = c.id
+            JOIN gas_products gp ON lr.gas_product_id = gp.id
+            LEFT JOIN suppliers sp ON lr.supplier_id = sp.id
+            WHERE lr.created_at >= (?::date)
+              AND lr.created_at < (?::date + INTERVAL '1 day')
+            GROUP BY c.name, c.phone, supplier_name, gp.capacity
+            ORDER BY c.name, supplier_name, gp.capacity
+            ''',
+            (start_date, end_date),
+        )
+
+    def resolve_tracking_product_id(self, gas_type: str, capacity: str, sub_type: Optional[str] = None) -> Optional[int]:
+        if gas_type == 'LPG' and capacity == '12/15kg':
+            rows = self.execute_query(
+                '''
+                SELECT id
+                FROM gas_products
+                WHERE gas_type = 'LPG' AND capacity IN ('12kg', '15kg') AND is_active = TRUE
+                ORDER BY capacity, id
+                LIMIT 1
+                '''
+            )
+            return int(rows[0]['id']) if rows else None
+        rows = self.execute_query(
+            '''
+            SELECT id
+            FROM gas_products
+            WHERE gas_type = ?
+              AND capacity = ?
+              AND COALESCE(sub_type, '') = COALESCE(?, '')
+              AND is_active = TRUE
+            ORDER BY id
+            LIMIT 1
+            ''',
+            (gas_type, capacity, sub_type or ''),
+        )
+        if rows:
+            return int(rows[0]['id'])
+        rows = self.execute_query(
+            '''
+            SELECT id
+            FROM gas_products
+            WHERE gas_type = ?
+              AND capacity = ?
+              AND is_active = TRUE
+            ORDER BY id
+            LIMIT 1
+            ''',
+            (gas_type, capacity),
+        )
+        return int(rows[0]['id']) if rows else None
+
+    def get_lpg_khata_summary(self) -> List[Dict]:
+        rows: List[Dict[str, Any]] = []
+        for client in self.get_clients():
+            statuses = self.get_client_cylinder_status(int(client['id']))
+            for status in statuses:
+                if status.get('gas_type') != 'LPG':
+                    continue
+                returned = int(status.get('returned') or 0)
+                refilled = int(status.get('refilled') or 0)
+                rows.append(
+                    {
+                        'client_name': client['name'],
+                        'phone': client['phone'],
+                        'company': client.get('company') or '',
+                        'capacity': status.get('capacity') or '',
+                        'delivered': int(status.get('delivered') or 0),
+                        'returned': returned,
+                        'pending_client': int(status.get('pending') or 0),
+                        'refilled': refilled,
+                        'empty_balance': max(0, returned - refilled),
+                    }
+                )
+        rows.sort(key=lambda row: (row['client_name'], row['capacity']))
+        return rows
+
     def get_gate_activity_report(self, start_date: date, end_date: date) -> List[Dict]:
         return []
     # Add to class DatabaseManager:
@@ -1426,14 +2187,30 @@ class DatabaseManager:
         )
         returned_map = {(r['gas_type'], r['cap_group']): int(r['qty']) for r in return_rows}
 
+        refill_rows = self.execute_query(
+            '''
+            SELECT gp.gas_type,
+                   CASE WHEN gp.gas_type = 'LPG' AND gp.capacity IN ('12kg','15kg') THEN '12/15kg' ELSE gp.capacity END AS cap_group,
+                   COALESCE(SUM(lr.quantity), 0) AS qty
+            FROM lpg_refills lr
+            JOIN gas_products gp ON lr.gas_product_id = gp.id
+            WHERE lr.client_id = ?
+            GROUP BY gp.gas_type, cap_group
+            ''',
+            (client_id,)
+        )
+        refilled_map = {(r['gas_type'], r['cap_group']): int(r['qty']) for r in refill_rows}
+
         keys.update(init_map.keys())
         keys.update(delivered_map.keys())
         keys.update(returned_map.keys())
+        keys.update(refilled_map.keys())
 
         rows: List[Dict[str, Any]] = []
         for gas_type, cap_group in sorted(keys, key=lambda x: (x[0], x[1])):
             delivered = int(delivered_map.get((gas_type, cap_group), 0)) + int(init_map.get((gas_type, cap_group), 0))
             returned = int(returned_map.get((gas_type, cap_group), 0))
+            refilled = int(refilled_map.get((gas_type, cap_group), 0)) if gas_type == 'LPG' else 0
             pending = max(0, delivered - returned)
             rows.append({
                 'gas_type': gas_type,
@@ -1441,9 +2218,47 @@ class DatabaseManager:
                 'capacity': cap_group,
                 'delivered': delivered,
                 'returned': returned,
+                'refilled': refilled,
+                'empty_balance': max(0, returned - refilled) if gas_type == 'LPG' else 0,
                 'pending': pending,
             })
         return rows
+
+    def add_lpg_refill(self, client_id: int, gas_product_id: int, quantity: int, supplier_id: Optional[int] = None,
+                       unit_price: float = 0.0, notes: str = "", created_by: Optional[int] = None) -> int:
+        qty = int(quantity or 0)
+        if qty <= 0:
+            raise ValueError("Refill quantity must be greater than zero.")
+        product = self.get_gas_product_by_id(gas_product_id)
+        if not product or product.get('gas_type') != 'LPG':
+            raise ValueError("Selected product is not an LPG product.")
+        statuses = self.get_client_cylinder_status(client_id)
+        matching_row = None
+        product_capacity = '12/15kg' if product.get('capacity') in ('12kg', '15kg') else product.get('capacity')
+        for row in statuses:
+            if row.get('gas_type') == 'LPG' and row.get('capacity') == product_capacity:
+                matching_row = row
+                break
+        available_balance = int(matching_row.get('empty_balance') or 0) if matching_row else 0
+        if qty > available_balance:
+            raise ValueError(f"Only {available_balance} LPG empty cylinders are available for refill.")
+        total_amount = round(float(unit_price or 0) * qty, 2)
+        refill_id = self.execute_update(
+            '''
+            INSERT INTO lpg_refills (client_id, gas_product_id, supplier_id, quantity, unit_price, total_amount, notes, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (client_id, gas_product_id, supplier_id, qty, float(unit_price or 0), total_amount, notes.strip(), created_by),
+        )
+        try:
+            self.log_activity(
+                'LPG_REFILL',
+                f"LPG refill recorded for client {client_id}, product {gas_product_id}, qty {qty}",
+                created_by,
+            )
+        except Exception:
+            pass
+        return refill_id
 
     def add_cylinder_return(self, client_id: int, gas_type: str, sub_type: str, capacity: str, quantity: int):
         query = '''

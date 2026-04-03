@@ -214,9 +214,10 @@ body { font-family: Arial, sans-serif; color: #111; background: #fff; margin: 0;
         if for_print:
             for it in items:
                 prod = f"{it['gas_type']}{(' ' + it['sub_type']) if it.get('sub_type') else ''} {it['capacity']}".strip()
+                supplier = it.get('supplier_name') or 'Company Stock'
                 disc = max(0.0, float(it['quantity']) * float(it['unit_price']) - float(it['subtotal']))
                 rows_parts.append(
-                    f"<tr><td>{str(it['created_at'])[:10]}</td><td>{prod}</td><td>{it['quantity']}</td><td>{disc:,.0f}</td><td>{float(it['subtotal']):,.0f}</td><td>{float(it['tax_amount']):,.0f}</td><td>{float(it['total_amount']):,.0f}</td></tr>"
+                    f"<tr><td>{str(it['created_at'])[:10]}</td><td>{prod}<br/><span style='font-size:8px;color:#475569'>Source: {supplier}</span></td><td>{it['quantity']}</td><td>{disc:,.0f}</td><td>{float(it['subtotal']):,.0f}</td><td>{float(it['tax_amount']):,.0f}</td><td>{float(it['total_amount']):,.0f}</td></tr>"
                 )
         else:
             try:
@@ -225,10 +226,11 @@ body { font-family: Arial, sans-serif; color: #111; background: #fff; margin: 0;
                 summaries = {}
             products_text = summaries.get('product_summary') or (f"{self.receipt_data.get('gas_type','')} {self.receipt_data.get('capacity','')}".strip())
             quantities_text = summaries.get('quantities_summary') or str(self.receipt_data.get('quantity') or '')
+            source_text = summaries.get('source_summary') or self.receipt_data.get('source_summary') or 'Company Stock'
             rows_parts.append(
                 f"<tr>"
                 f"<td>{self.receipt_data['created_at'][:10]}</td>"
-                f"<td>{products_text}</td>"
+                f"<td>{products_text}<br/><span style='font-size:8px;color:#475569'>Source: {source_text}</span></td>"
                 f"<td>{quantities_text}</td>"
                 f"<td>{sum_subtotal:,.0f}</td>"
                 f"<td>{total_tax_val:,.0f}</td>"
@@ -554,9 +556,9 @@ class ReceiptsWidget(QWidget):
         table_layout.setContentsMargins(10, 10, 10, 10)
 
         self.receipts_table = QTableWidget()
-        self.receipts_table.setColumnCount(9)
+        self.receipts_table.setColumnCount(10)
         self.receipts_table.setHorizontalHeaderLabels([
-            "Receipt #", "Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Actions"
+            "Receipt #", "Date", "Client", "Products", "Sources", "Quantities", "Total", "Paid", "Balance", "Actions"
         ])
         self._setup_receipts_table()
         table_layout.addWidget(self.receipts_table)
@@ -620,20 +622,21 @@ class ReceiptsWidget(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(8, QHeaderView.Fixed)
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(9, QHeaderView.Fixed)
 
-        self.receipts_table.setColumnWidth(8, 250)
+        self.receipts_table.setColumnWidth(9, 250)
 
     def _show_no_receipts_message(self):
         with table_batch_update(self.receipts_table):
             self.receipts_table.clearSpans()
             self.receipts_table.setRowCount(1)
             self.receipts_table.setItem(0, 0, QTableWidgetItem("No receipts found"))
-            self.receipts_table.setSpan(0, 0, 1, 9)
+            self.receipts_table.setSpan(0, 0, 1, 10)
             item = self.receipts_table.item(0, 0)
             item.setTextAlignment(Qt.AlignCenter)
             item.setForeground(Qt.gray)
@@ -739,17 +742,18 @@ class ReceiptsWidget(QWidget):
 
                 product_text = as_text(receipt.get('product_summary') or '')
                 self.receipts_table.setItem(row, 3, QTableWidgetItem(product_text))
+                self.receipts_table.setItem(row, 4, QTableWidgetItem(as_text(receipt.get('source_summary') or 'Company Stock')))
 
                 quantities_text = as_text(receipt.get('quantities_summary') or receipt.get('quantity') or '')
-                self.receipts_table.setItem(row, 4, QTableWidgetItem(quantities_text))
+                self.receipts_table.setItem(row, 5, QTableWidgetItem(quantities_text))
 
                 total_item = QTableWidgetItem(as_money(receipt.get('total_amount')))
                 total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.receipts_table.setItem(row, 5, total_item)
+                self.receipts_table.setItem(row, 6, total_item)
 
                 paid_item = QTableWidgetItem(as_money(receipt.get('amount_paid')))
                 paid_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.receipts_table.setItem(row, 6, paid_item)
+                self.receipts_table.setItem(row, 7, paid_item)
 
                 balance_value = float(receipt.get('balance') or 0)
                 balance_item = QTableWidgetItem(as_money(balance_value))
@@ -760,7 +764,7 @@ class ReceiptsWidget(QWidget):
                     balance_item.setForeground(Qt.darkYellow)
                 else:
                     balance_item.setForeground(Qt.darkGreen)
-                self.receipts_table.setItem(row, 7, balance_item)
+                self.receipts_table.setItem(row, 8, balance_item)
             
                 actions_widget = QWidget()
                 actions_widget.setMinimumHeight(34)
@@ -784,7 +788,7 @@ class ReceiptsWidget(QWidget):
                 export_btn.clicked.connect(lambda checked, r=receipt: self.export_receipt_pdf(r))
                 actions_layout.addWidget(export_btn)
 
-                self.receipts_table.setCellWidget(row, 8, actions_widget)
+                self.receipts_table.setCellWidget(row, 9, actions_widget)
                 self.receipts_table.setRowHeight(row, 44)
     
     def filter_receipts(self):

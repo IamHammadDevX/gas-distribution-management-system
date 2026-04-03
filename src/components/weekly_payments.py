@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QDate, QSizeF
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout
 from src.database_module import DatabaseManager
+from src.components.ui_helpers import refresh_application_views
 
 class WeeklyClientReceiptDialog(QDialog):
     def __init__(self, db_manager: DatabaseManager, invoice_row: dict, parent=None):
@@ -81,6 +82,8 @@ class WeeklyClientReceiptDialog(QDialog):
         phone = self.invoice.get('client_phone') or ''
         cyl_breakdown = self.db_manager.get_weekly_sales_breakdown(self.invoice['client_id'], ws, we)
         empty_breakdown = self.db_manager.get_weekly_returns_breakdown(self.invoice['client_id'], ws, we)
+        supplier_breakdown = self.db_manager.get_weekly_supplier_breakdown_text(self.invoice['client_id'], ws, we)
+        lpg_refill_breakdown = self.db_manager.get_weekly_lpg_refill_breakdown(self.invoice['client_id'], ws, we)
 
         style = """
     body { font-family: Arial, sans-serif; color:#111827; margin:0; }
@@ -124,6 +127,8 @@ class WeeklyClientReceiptDialog(QDialog):
     <table class='summary'>
         <tr><td class='k'>Cylinders Delivered</td><td>{cyl_breakdown or '0'}</td></tr>
         <tr><td class='k'>Empty Return</td><td>{empty_breakdown or '0'}</td></tr>
+        <tr><td class='k'>Source Breakdown</td><td>{supplier_breakdown or '0'}</td></tr>
+        <tr><td class='k'>LPG Refill</td><td>{lpg_refill_breakdown or '0'}</td></tr>
     </table>
 
     <table class='table'>
@@ -190,6 +195,7 @@ class WeeklyPaymentsWidget(QWidget):
         self.db_manager = db_manager
         self.current_user = current_user
         self.init_ui()
+        self.refresh_filters()
         self.load_weekly_invoices()
 
     def init_ui(self):
@@ -245,12 +251,13 @@ class WeeklyPaymentsWidget(QWidget):
         bar.addWidget(QLabel("Week end:"))
         bar.addWidget(self.end_day_combo)
         self.client_filter = QComboBox()
-        self.client_filter.addItem("All Clients", None)
-        for c in self.db_manager.get_clients():
-            self.client_filter.addItem(c['name'], c['id'])
         self.client_filter.currentIndexChanged.connect(self.load_weekly_invoices)
         bar.addWidget(QLabel("Client:"))
         bar.addWidget(self.client_filter)
+        self.supplier_filter = QComboBox()
+        self.supplier_filter.currentIndexChanged.connect(self.load_weekly_invoices)
+        bar.addWidget(QLabel("Source:"))
+        bar.addWidget(self.supplier_filter)
         self.status_filter = QComboBox()
         self.status_filter.addItems(["All", "PAID", "UNPAID"])
         self.status_filter.currentTextChanged.connect(self.load_weekly_invoices)
@@ -264,7 +271,7 @@ class WeeklyPaymentsWidget(QWidget):
         self.max_remaining.textChanged.connect(self.load_weekly_invoices)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search client/company/status/ref/week...")
+        self.search_input.setPlaceholderText("Search client/company/source/status/ref/week...")
         self.search_input.textChanged.connect(self.load_weekly_invoices)
 
         self.week_label = QLabel("Week: -")
@@ -294,9 +301,9 @@ class WeeklyPaymentsWidget(QWidget):
         g_layout.addWidget(group_title)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(14)
+        self.table.setColumnCount(15)
         self.table.setHorizontalHeaderLabels([
-            "Client", "Cylinders", "Empty Return", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Remaining", "Status", "Actions", "Week"
+            "Client", "Cylinders", "Empty Return", "Sources", "Subtotal", "Discount", "Tax (16%)", "Total Payable", "Prev Balance", "Final Payable", "Paid", "Remaining", "Status", "Actions", "Week"
         ])
         self._setup_table()
         g_layout.addWidget(self.table)
@@ -350,24 +357,25 @@ class WeeklyPaymentsWidget(QWidget):
         hh = self.table.horizontalHeader()
         hh.setStretchLastSection(False)
         hh.setMinimumSectionSize(70)
-        for idx in range(14):
+        for idx in range(15):
             hh.setSectionResizeMode(idx, QHeaderView.Fixed)
 
         self.table.setColumnWidth(0, 180)
         self.table.setColumnWidth(1, 170)
         self.table.setColumnWidth(2, 170)
-        self.table.setColumnWidth(3, 95)
+        self.table.setColumnWidth(3, 220)
         self.table.setColumnWidth(4, 95)
-        self.table.setColumnWidth(5, 90)
-        self.table.setColumnWidth(6, 110)
-        self.table.setColumnWidth(7, 105)
-        self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 90)
-        self.table.setColumnWidth(10, 105)
-        self.table.setColumnWidth(11, 85)
-        hh.setSectionResizeMode(12, QHeaderView.Fixed)
-        self.table.setColumnWidth(12, 230)
-        self.table.setColumnWidth(13, 170)
+        self.table.setColumnWidth(5, 95)
+        self.table.setColumnWidth(6, 90)
+        self.table.setColumnWidth(7, 110)
+        self.table.setColumnWidth(8, 105)
+        self.table.setColumnWidth(9, 110)
+        self.table.setColumnWidth(10, 90)
+        self.table.setColumnWidth(11, 105)
+        self.table.setColumnWidth(12, 85)
+        hh.setSectionResizeMode(13, QHeaderView.Fixed)
+        self.table.setColumnWidth(13, 230)
+        self.table.setColumnWidth(14, 170)
 
     def get_week_range(self):
         d = self.date_edit.date().toPython()
@@ -382,7 +390,34 @@ class WeeklyPaymentsWidget(QWidget):
             week_end = week_start + timedelta(days=5)
         return week_start.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d')
 
+    def refresh_filters(self):
+        current_client = self.client_filter.currentData() if self.client_filter.count() else None
+        current_supplier = self.supplier_filter.currentData() if self.supplier_filter.count() else None
+
+        self.client_filter.blockSignals(True)
+        self.client_filter.clear()
+        self.client_filter.addItem("All Clients", None)
+        for client in self.db_manager.get_clients():
+            self.client_filter.addItem(client['name'], client['id'])
+        for idx in range(self.client_filter.count()):
+            if self.client_filter.itemData(idx) == current_client:
+                self.client_filter.setCurrentIndex(idx)
+                break
+        self.client_filter.blockSignals(False)
+
+        self.supplier_filter.blockSignals(True)
+        self.supplier_filter.clear()
+        self.supplier_filter.addItem("All Sources", None)
+        for supplier in self.db_manager.get_suppliers():
+            self.supplier_filter.addItem(supplier['name'], supplier['id'])
+        for idx in range(self.supplier_filter.count()):
+            if self.supplier_filter.itemData(idx) == current_supplier:
+                self.supplier_filter.setCurrentIndex(idx)
+                break
+        self.supplier_filter.blockSignals(False)
+
     def load_weekly_invoices(self):
+        self.refresh_filters()
         ws, we = self.get_week_range()
         self.week_label.setText(f"Week: {ws} to {we}")
         clients = self.db_manager.get_clients()
@@ -398,6 +433,14 @@ class WeeklyPaymentsWidget(QWidget):
         cid = self.client_filter.currentData()
         if cid:
             rows = [r for r in rows if r['client_id'] == cid]
+        selected_supplier = self.supplier_filter.currentData()
+        if selected_supplier:
+            filtered_rows = []
+            for row in rows:
+                supplier_rows = self.db_manager.get_weekly_supplier_breakdown(row['client_id'], ws, we)
+                if any(int(s.get('supplier_key') or 0) == int(selected_supplier) for s in supplier_rows):
+                    filtered_rows.append(row)
+            rows = filtered_rows
         st = self.status_filter.currentText()
         if st in ("PAID", "UNPAID"):
             rows = [r for r in rows if r['status'] == st]
@@ -429,6 +472,7 @@ class WeeklyPaymentsWidget(QWidget):
                     str(r.get('status') or ''),
                     str(r.get('invoice_number') or ''),
                     str(r.get('receipt_number') or ''),
+                    self.db_manager.get_weekly_supplier_breakdown_text(r['client_id'], ws, we),
                     str(r.get('week_start') or ''),
                     str(r.get('week_end') or ''),
                 ]).lower()
@@ -446,26 +490,28 @@ class WeeklyPaymentsWidget(QWidget):
             # Cylinder breakdown and Empty Return
             cyl_breakdown = self.db_manager.get_weekly_sales_breakdown(r['client_id'], ws, we)
             empty_returns = self.db_manager.get_weekly_returns_breakdown(r['client_id'], ws, we)
+            supplier_breakdown = self.db_manager.get_weekly_supplier_breakdown_text(r['client_id'], ws, we)
             self.table.setItem(i, 1, QTableWidgetItem(cyl_breakdown))
             self.table.setItem(i, 2, QTableWidgetItem(empty_returns))
+            self.table.setItem(i, 3, QTableWidgetItem(supplier_breakdown))
             
-            self.table.setItem(i, 3, QTableWidgetItem(f"{float(r['subtotal']):,.2f}"))
-            self.table.setItem(i, 4, QTableWidgetItem(f"{float(r['discount']):,.2f}"))
-            self.table.setItem(i, 5, QTableWidgetItem(f"{float(r['tax_amount']):,.2f}"))
-            self.table.setItem(i, 6, QTableWidgetItem(f"{float(r['total_payable']):,.2f}"))
-            self.table.setItem(i, 7, QTableWidgetItem(f"{float(r['previous_balance']):,.2f}"))
-            self.table.setItem(i, 8, QTableWidgetItem(f"{float(r['final_payable']):,.2f}"))
-            self.table.setItem(i, 9, QTableWidgetItem(f"{float(r['amount_paid']):,.2f}"))
+            self.table.setItem(i, 4, QTableWidgetItem(f"{float(r['subtotal']):,.2f}"))
+            self.table.setItem(i, 5, QTableWidgetItem(f"{float(r['discount']):,.2f}"))
+            self.table.setItem(i, 6, QTableWidgetItem(f"{float(r['tax_amount']):,.2f}"))
+            self.table.setItem(i, 7, QTableWidgetItem(f"{float(r['total_payable']):,.2f}"))
+            self.table.setItem(i, 8, QTableWidgetItem(f"{float(r['previous_balance']):,.2f}"))
+            self.table.setItem(i, 9, QTableWidgetItem(f"{float(r['final_payable']):,.2f}"))
+            self.table.setItem(i, 10, QTableWidgetItem(f"{float(r['amount_paid']):,.2f}"))
             remaining_val = max(0.0, float(r['final_payable']) - float(r['amount_paid']))
-            self.table.setItem(i, 10, QTableWidgetItem(f"{remaining_val:,.2f}"))
+            self.table.setItem(i, 11, QTableWidgetItem(f"{remaining_val:,.2f}"))
             status_item = QTableWidgetItem(r['status'])
             if r['status'] == 'PAID':
                 status_item.setForeground(Qt.darkGreen)
             else:
                 status_item.setForeground(Qt.red)
-            self.table.setItem(i, 11, status_item)
+            self.table.setItem(i, 12, status_item)
 
-            for col_idx in [3, 4, 5, 6, 7, 8, 9, 10]:
+            for col_idx in [4, 5, 6, 7, 8, 9, 10, 11]:
                 item = self.table.item(i, col_idx)
                 if item:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -490,8 +536,8 @@ class WeeklyPaymentsWidget(QWidget):
             btn_mark.clicked.connect(lambda checked=False, row=r: self.mark_paid(row))
             h.addWidget(btn_mark)
             actions.setLayout(h)
-            self.table.setCellWidget(i, 12, actions)
-            self.table.setItem(i, 13, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
+            self.table.setCellWidget(i, 13, actions)
+            self.table.setItem(i, 14, QTableWidgetItem(f"{r['week_start']} to {r['week_end']}"))
             self.table.setRowHeight(i, 28)
 
     def print_client(self, invoice_row: dict):
@@ -539,20 +585,7 @@ class WeeklyPaymentsWidget(QWidget):
             self.db_manager.record_weekly_payment(invoice_row['id'], amount, day, self.current_user.get('id'), method.currentText())
             QMessageBox.information(self, "Success", "Payment recorded.")
             self.load_weekly_invoices()
-            try:
-                from PySide6.QtWidgets import QApplication
-                mw = None
-                for w in QApplication.topLevelWidgets():
-                    if hasattr(w, 'refresh_dashboard'):
-                        mw = w
-                        break
-                if mw:
-                    mw.refresh_dashboard()
-                    mw.refresh_current_page("clients")
-                    mw.refresh_current_page("receipts")
-                    mw.refresh_current_page("cylinder_track")
-            except Exception:
-                pass
+            refresh_application_views("weekly_payments", "clients", "receipts", "cylinder_track", "reports")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
@@ -561,20 +594,7 @@ class WeeklyPaymentsWidget(QWidget):
             self.db_manager.mark_weekly_invoice_paid(invoice_row['id'])
             QMessageBox.information(self, "Success", "Weekly invoice marked as PAID.")
             self.load_weekly_invoices()
-            try:
-                from PySide6.QtWidgets import QApplication
-                mw = None
-                for w in QApplication.topLevelWidgets():
-                    if hasattr(w, 'refresh_dashboard'):
-                        mw = w
-                        break
-                if mw:
-                    mw.refresh_dashboard()
-                    mw.refresh_current_page("clients")
-                    mw.refresh_current_page("receipts")
-                    mw.refresh_current_page("cylinder_track")
-            except Exception:
-                pass
+            refresh_application_views("weekly_payments", "clients", "receipts", "cylinder_track", "reports")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
@@ -641,7 +661,7 @@ class WeeklyPaymentsWidget(QWidget):
                     f"<div class='title'>WEEKLY BILLING STATEMENT ({ws} to {we})</div>",
                 ]
 
-                html.append("<table><tr><th>#</th><th>First Name</th><th>Cylinders</th><th>Empty Return</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Remaining</th><th>Status</th></tr>")
+                html.append("<table><tr><th>#</th><th>First Name</th><th>Cylinders</th><th>Empty Return</th><th>Sources</th><th>Subtotal</th><th>Discount</th><th>Tax</th><th>Total</th><th>Prev</th><th>Final</th><th>Paid</th><th>Remaining</th><th>Status</th></tr>")
 
                 for i in range(self.table.rowCount()):
                     raw_client = self.table.item(i, 0).text() if self.table.item(i, 0) else ""
@@ -649,15 +669,16 @@ class WeeklyPaymentsWidget(QWidget):
                     first_name = full_name.split()[0] if full_name else "-"
                     cyl = self.table.item(i, 1).text() if self.table.item(i, 1) else ""
                     empty = self.table.item(i, 2).text() if self.table.item(i, 2) else ""
-                    sub = self.table.item(i, 3).text() if self.table.item(i, 3) else ""
-                    disc = self.table.item(i, 4).text() if self.table.item(i, 4) else ""
-                    tax = self.table.item(i, 5).text() if self.table.item(i, 5) else ""
-                    tot = self.table.item(i, 6).text() if self.table.item(i, 6) else ""
-                    prev = self.table.item(i, 7).text() if self.table.item(i, 7) else ""
-                    final = self.table.item(i, 8).text() if self.table.item(i, 8) else ""
-                    paid = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
-                    remaining = self.table.item(i, 10).text() if self.table.item(i, 10) else ""
-                    status = self.table.item(i, 11).text() if self.table.item(i, 11) else ""
+                    source = self.table.item(i, 3).text() if self.table.item(i, 3) else ""
+                    sub = self.table.item(i, 4).text() if self.table.item(i, 4) else ""
+                    disc = self.table.item(i, 5).text() if self.table.item(i, 5) else ""
+                    tax = self.table.item(i, 6).text() if self.table.item(i, 6) else ""
+                    tot = self.table.item(i, 7).text() if self.table.item(i, 7) else ""
+                    prev = self.table.item(i, 8).text() if self.table.item(i, 8) else ""
+                    final = self.table.item(i, 9).text() if self.table.item(i, 9) else ""
+                    paid = self.table.item(i, 10).text() if self.table.item(i, 10) else ""
+                    remaining = self.table.item(i, 11).text() if self.table.item(i, 11) else ""
+                    status = self.table.item(i, 12).text() if self.table.item(i, 12) else ""
 
                     try:
                         total_final += float((final or "0").replace(',', ''))
@@ -668,7 +689,7 @@ class WeeklyPaymentsWidget(QWidget):
 
                     status_cls = "status-paid" if status == "PAID" else "status-unpaid"
                     html.append(
-                        f"<tr><td>{i+1}</td><td>{first_name}</td><td>{cyl}</td><td>{empty}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td class='{status_cls}'>{status}</td></tr>"
+                        f"<tr><td>{i+1}</td><td>{first_name}</td><td>{cyl}</td><td>{empty}</td><td>{source}</td><td>{sub}</td><td>{disc}</td><td>{tax}</td><td>{tot}</td><td>{prev}</td><td>{final}</td><td>{paid}</td><td>{remaining}</td><td class='{status_cls}'>{status}</td></tr>"
                     )
 
                 html.append("</table>")

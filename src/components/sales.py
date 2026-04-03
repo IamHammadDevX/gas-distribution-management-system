@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
-from src.components.ui_helpers import as_datetime_text, as_money, as_text, table_batch_update
+from src.components.ui_helpers import as_datetime_text, as_money, as_text, refresh_application_views, table_batch_update
 
 class SalesWidget(QWidget):
     def __init__(self, db_manager: DatabaseManager, current_user: dict):
@@ -16,6 +16,7 @@ class SalesWidget(QWidget):
         self.current_client = None
         self.current_products = []
         self.init_ui()
+        self.load_suppliers()
         self.load_gas_products()
         self.load_recent_sales()
 
@@ -93,6 +94,10 @@ class SalesWidget(QWidget):
         self.gas_product_combo.currentIndexChanged.connect(self.on_product_selected)
         product_form.addRow("Product:", self.gas_product_combo)
 
+        self.supplier_combo = QComboBox()
+        self.supplier_combo.currentIndexChanged.connect(self.on_supplier_changed)
+        product_form.addRow("Source Supplier:", self.supplier_combo)
+
         self.quantity_spinbox = QSpinBox()
         self.quantity_spinbox.setRange(1, 1000)
         self.quantity_spinbox.setValue(1)
@@ -122,7 +127,20 @@ class SalesWidget(QWidget):
         self.product_tax_spinbox.setSingleStep(0.5)
         self.product_tax_spinbox.valueChanged.connect(self.calculate_totals)
         product_form.addRow("Tax Rate:", self.product_tax_spinbox)
+
+        self.fill_cost_spinbox = QDoubleSpinBox()
+        self.fill_cost_spinbox.setRange(0, 1000000)
+        self.fill_cost_spinbox.setDecimals(2)
+        self.fill_cost_spinbox.setPrefix("Rs. ")
+        self.fill_cost_spinbox.setSingleStep(50)
+        self.fill_cost_spinbox.setEnabled(False)
+        product_form.addRow("Fill Cost / Cylinder:", self.fill_cost_spinbox)
         product_layout.addLayout(product_form)
+
+        self.product_hint_label = QLabel("Use source supplier only when this gas was filled from an outside company.")
+        self.product_hint_label.setObjectName("hintLabel")
+        self.product_hint_label.setWordWrap(True)
+        product_layout.addWidget(self.product_hint_label)
 
         line_totals = QHBoxLayout()
         line_totals.setSpacing(10)
@@ -157,9 +175,9 @@ class SalesWidget(QWidget):
 
         cart_card, cart_layout = self._create_section_card("Cart")
         self.cart_table = QTableWidget()
-        self.cart_table.setColumnCount(8)
+        self.cart_table.setColumnCount(9)
         self.cart_table.setHorizontalHeaderLabels([
-            "Products", "Quantity", "Unit Price", "Discount", "Tax (%)", "Subtotal", "Tax", "Total"
+            "Products", "Source", "Quantity", "Sale Unit", "Fill Unit", "Discount", "Tax (%)", "Customer Total", "Vendor Total"
         ])
         self._setup_table(self.cart_table, min_height=170)
         cart_layout.addWidget(self.cart_table)
@@ -228,13 +246,13 @@ class SalesWidget(QWidget):
 
         recent_card, recent_layout = self._create_section_card("Recent Sales")
         self.recent_sales_table = QTableWidget()
-        self.recent_sales_table.setColumnCount(8)
+        self.recent_sales_table.setColumnCount(9)
         self.recent_sales_table.setHorizontalHeaderLabels([
-            "Date", "Client", "Products", "Quantities", "Total", "Paid", "Balance", "Actions"
+            "Date", "Client", "Products", "Sources", "Quantities", "Total", "Paid", "Balance", "Actions"
         ])
         self._setup_table(self.recent_sales_table, min_height=170)
-        self.recent_sales_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
-        self.recent_sales_table.setColumnWidth(7, 150)
+        self.recent_sales_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeToContents)
+        self.recent_sales_table.setColumnWidth(8, 150)
         recent_layout.addWidget(self.recent_sales_table)
         layout.addWidget(recent_card)
 
@@ -329,7 +347,37 @@ class SalesWidget(QWidget):
         if index >= 0:
             product = self.gas_product_combo.itemData(index)
             self.unit_price_spinbox.setValue(float(product['unit_price']))
+            if product.get('gas_type') == 'LPG':
+                self.product_hint_label.setText("LPG sale source is stored here. LPG refill entries are recorded from Cylinder Track.")
+            else:
+                self.product_hint_label.setText("Use source supplier only when this gas was filled from an outside company.")
             self.calculate_totals()
+
+    def on_supplier_changed(self):
+        supplier = self.supplier_combo.currentData()
+        has_supplier = isinstance(supplier, dict)
+        self.fill_cost_spinbox.setEnabled(has_supplier)
+        if not has_supplier:
+            self.fill_cost_spinbox.setValue(0)
+
+    def load_suppliers(self):
+        try:
+            current_supplier = self.supplier_combo.currentData() if hasattr(self, "supplier_combo") else None
+            self.supplier_combo.clear()
+            self.supplier_combo.addItem("Company Stock / No Supplier", None)
+            for supplier in self.db_manager.get_suppliers():
+                self.supplier_combo.addItem(supplier["name"], supplier)
+            if current_supplier is None:
+                self.supplier_combo.setCurrentIndex(0)
+                return
+            for idx in range(self.supplier_combo.count()):
+                data = self.supplier_combo.itemData(idx)
+                if isinstance(data, dict) and data.get("id") == current_supplier.get("id"):
+                    self.supplier_combo.setCurrentIndex(idx)
+                    return
+            self.supplier_combo.setCurrentIndex(0)
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load suppliers: {str(e)}")
 
     def calculate_totals(self):
         quantity = self.quantity_spinbox.value()
@@ -398,10 +446,26 @@ class SalesWidget(QWidget):
         subtotal = max(0.0, quantity * unit_price - line_discount)
         tax = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0.00
         total = subtotal + tax
+        supplier = self.supplier_combo.currentData()
+        fill_cost = float(self.fill_cost_spinbox.value()) if isinstance(supplier, dict) else 0.0
+        if isinstance(supplier, dict) and fill_cost <= 0:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Fill Cost",
+                "A source supplier is selected but fill cost is Rs. 0.00.\n\nDo you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        fill_total = round(fill_cost * quantity, 2)
         cart_item = {
             'product': product,
+            'supplier': supplier,
             'quantity': quantity,
             'unit_price': unit_price,
+            'fill_unit_cost': fill_cost,
+            'fill_total': fill_total,
             'discount': line_discount,
             'tax_rate': tax_rate,
             'subtotal': subtotal,
@@ -423,13 +487,15 @@ class SalesWidget(QWidget):
                 product_text += f" - {product['sub_type']}"
             product_text += f" - {product['capacity']}"
             self.cart_table.setItem(row, 0, QTableWidgetItem(product_text))
-            self.cart_table.setItem(row, 1, QTableWidgetItem(str(item['quantity'])))
-            self.cart_table.setItem(row, 2, QTableWidgetItem(f"Rs. {item['unit_price']:,.2f}"))
-            self.cart_table.setItem(row, 3, QTableWidgetItem(f"Rs. {item.get('discount', 0.0):,.2f}"))
-            self.cart_table.setItem(row, 4, QTableWidgetItem(f"{item['tax_rate']*100:.2f} %"))
-            self.cart_table.setItem(row, 5, QTableWidgetItem(f"Rs. {item['subtotal']:,.2f}"))
-            self.cart_table.setItem(row, 6, QTableWidgetItem(f"Rs. {item['tax']:,.2f}"))
+            supplier = item.get("supplier") or {}
+            self.cart_table.setItem(row, 1, QTableWidgetItem(supplier.get("name") or "Company Stock"))
+            self.cart_table.setItem(row, 2, QTableWidgetItem(str(item['quantity'])))
+            self.cart_table.setItem(row, 3, QTableWidgetItem(f"Rs. {item['unit_price']:,.2f}"))
+            self.cart_table.setItem(row, 4, QTableWidgetItem(f"Rs. {item.get('fill_unit_cost', 0.0):,.2f}"))
+            self.cart_table.setItem(row, 5, QTableWidgetItem(f"Rs. {item.get('discount', 0.0):,.2f}"))
+            self.cart_table.setItem(row, 6, QTableWidgetItem(f"{item['tax_rate']*100:.2f} %"))
             self.cart_table.setItem(row, 7, QTableWidgetItem(f"Rs. {item['total']:,.2f}"))
+            self.cart_table.setItem(row, 8, QTableWidgetItem(f"Rs. {item.get('fill_total', 0.0):,.2f}"))
 
     def remove_from_cart(self):
         current_row = self.cart_table.currentRow()
@@ -451,6 +517,7 @@ class SalesWidget(QWidget):
         self.line_discount_spinbox.setValue(0)
         self.unit_price_spinbox.setValue(0)
         self.product_tax_spinbox.setValue(0.00)
+        self.fill_cost_spinbox.setValue(0)
         self.overall_discount_spinbox.setValue(0)
         self.amount_paid_spinbox.setValue(0)
         self.calculate_totals()
@@ -466,6 +533,7 @@ class SalesWidget(QWidget):
         self.unit_price_spinbox.setValue(0)
         self.line_discount_spinbox.setValue(0)
         self.product_tax_spinbox.setValue(0.00)
+        self.fill_cost_spinbox.setValue(0)
         self.overall_discount_spinbox.setValue(0)
         self.amount_paid_spinbox.setValue(0)
         self.subtotal_label.setText("Rs. 0.00")
@@ -545,39 +613,30 @@ class SalesWidget(QWidget):
             try:
                 current_client_id = self.current_client['id']
                 current_client_name = self.current_client['name']
-                # Create a sale header referencing the first product but store all items in sale_items
-                first_product = self.current_products[0]
-                sale_id = self.db_manager.create_sale(
+                receipt_number = self.db_manager.get_next_receipt_number()
+                result = self.db_manager.create_sale_with_receipt(
                     client_id=current_client_id,
-                    gas_product_id=first_product['product']['id'],
-                    quantity=first_product['quantity'],
-                    unit_price=first_product['unit_price'],
-                    subtotal=total_subtotal,
-                    tax_amount=total_tax,
+                    items=[
+                        {
+                            'gas_product_id': item['product']['id'],
+                            'supplier_id': item['supplier']['id'] if item.get('supplier') else None,
+                            'quantity': item['quantity'],
+                            'unit_price': item['unit_price'],
+                            'fill_unit_cost': item.get('fill_unit_cost', 0.0),
+                            'fill_total': item.get('fill_total', 0.0),
+                            'subtotal': item['subtotal'],
+                            'tax_amount': item['tax'],
+                            'total_amount': item['total'],
+                        }
+                        for item in self.current_products
+                    ],
+                    total_subtotal=total_subtotal,
+                    total_tax=total_tax,
                     total_amount=total_amount_after_discount,
                     amount_paid=amount_paid,
                     balance=balance,
-                    created_by=self.current_user['id']
-                )
-                for item in self.current_products:
-                    self.db_manager.add_sale_item(
-                        sale_id=sale_id,
-                        gas_product_id=item['product']['id'],
-                        quantity=item['quantity'],
-                        unit_price=item['unit_price'],
-                        subtotal=item['subtotal'],
-                        tax_amount=item['tax'],
-                        total_amount=item['total']
-                    )
-                receipt_number = self.db_manager.get_next_receipt_number()
-                self.db_manager.create_receipt(
+                    created_by=self.current_user['id'],
                     receipt_number=receipt_number,
-                    sale_id=sale_id,
-                    client_id=current_client_id,
-                    total_amount=total_amount,
-                    amount_paid=amount_paid,
-                    balance=balance,
-                    created_by=self.current_user['id']
                 )
                 self.db_manager.log_activity(
                     "CREATE_SALE",
@@ -599,7 +658,7 @@ class SalesWidget(QWidget):
                 QMessageBox.information(
                     self,
                     "Sale Completed",
-                    f"Sale completed successfully!\nReceipt Number: {receipt_number}"
+                    f"Sale completed successfully!\nReceipt Number: {result['receipt_number']}"
                 )
                 self.clear_cart()
                 self.clear_form()
@@ -619,19 +678,16 @@ class SalesWidget(QWidget):
                     self.client_combo.setCurrentIndex(-1)
                     self.current_client = None
                     self.client_info_label.setText("No client selected")
-                try:
-                    from PySide6.QtWidgets import QApplication
-                    mw = None
-                    for w in QApplication.topLevelWidgets():
-                        if hasattr(w, 'refresh_dashboard'):
-                            mw = w
-                            break
-                    if mw:
-                        mw.refresh_dashboard()
-                        mw.refresh_current_page("weekly_payments")
-                        mw.refresh_current_page("cylinder_availability")
-                except Exception:
-                    pass
+                refresh_application_views(
+                    "sales",
+                    "supplier_payments",
+                    "weekly_payments",
+                    "cylinder_availability",
+                    "daily_transactions",
+                    "receipts",
+                    "cylinder_track",
+                    "reports",
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to complete sale: {str(e)}")
 
@@ -644,18 +700,19 @@ class SalesWidget(QWidget):
                     self.recent_sales_table.setItem(row, 0, QTableWidgetItem(as_datetime_text(sale.get('created_at'), 16)))
                     self.recent_sales_table.setItem(row, 1, QTableWidgetItem(as_text(sale.get('client_name'))))
                     self.recent_sales_table.setItem(row, 2, QTableWidgetItem(as_text(sale.get('product_summary') or '')))
-                    self.recent_sales_table.setItem(row, 3, QTableWidgetItem(as_text(sale.get('quantities_summary') or sale.get('quantity') or '')))
-                    self.recent_sales_table.setItem(row, 4, QTableWidgetItem(as_money(sale.get('total_amount'))))
-                    self.recent_sales_table.setItem(row, 5, QTableWidgetItem(as_money(sale.get('amount_paid'))))
-                    self.recent_sales_table.setItem(row, 6, QTableWidgetItem(as_money(sale.get('balance'))))
+                    self.recent_sales_table.setItem(row, 3, QTableWidgetItem(as_text(sale.get('source_summary') or 'Company Stock')))
+                    self.recent_sales_table.setItem(row, 4, QTableWidgetItem(as_text(sale.get('quantities_summary') or sale.get('quantity') or '')))
+                    self.recent_sales_table.setItem(row, 5, QTableWidgetItem(as_money(sale.get('total_amount'))))
+                    self.recent_sales_table.setItem(row, 6, QTableWidgetItem(as_money(sale.get('amount_paid'))))
+                    self.recent_sales_table.setItem(row, 7, QTableWidgetItem(as_money(sale.get('balance'))))
 
                     balance_value = float(sale.get('balance') or 0)
                     if balance_value > 0:
-                        self.recent_sales_table.item(row, 6).setForeground(Qt.red)
+                        self.recent_sales_table.item(row, 7).setForeground(Qt.red)
                     elif balance_value < 0:
-                        self.recent_sales_table.item(row, 6).setForeground(Qt.darkYellow)
+                        self.recent_sales_table.item(row, 7).setForeground(Qt.darkYellow)
                     else:
-                        self.recent_sales_table.item(row, 6).setForeground(Qt.darkGreen)
+                        self.recent_sales_table.item(row, 7).setForeground(Qt.darkGreen)
 
                     generate_btn = QPushButton("Generate Receipt")
                     generate_btn.setMinimumHeight(30)
@@ -668,7 +725,7 @@ class SalesWidget(QWidget):
                         "QPushButton:focus { outline: none; }"
                     )
                     generate_btn.clicked.connect(lambda checked, s=sale: self.generate_receipt_for_sale(s))
-                    self.recent_sales_table.setCellWidget(row, 7, generate_btn)
+                    self.recent_sales_table.setCellWidget(row, 8, generate_btn)
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load recent sales: {str(e)}")
 

@@ -6,6 +6,8 @@ from PySide6.QtGui import QFont, QGuiApplication
 from src.database_module import DatabaseManager
 from datetime import datetime
 from src.components.clients import ClientsWidget
+from src.components.suppliers import SuppliersWidget
+from src.components.supplier_payments import SupplierPaymentsWidget
 from src.components.gas_products import GasProductsWidget
 from src.components.sales import SalesWidget
 from src.components.receipts import ReceiptsWidget
@@ -177,6 +179,8 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("Dashboard", "dashboard"),
             ("Clients", "clients"),
+            ("Suppliers", "suppliers"),
+            ("Supplier Payments", "supplier_payments"),
             ("Gas Products", "gas_products"),
             ("Cylinder Availability", "cylinder_availability"),
             ("Sales", "sales"),
@@ -294,6 +298,14 @@ class MainWindow(QMainWindow):
         clients_widget = ClientsWidget(self.db_manager, self.current_user)
         self.widgets["clients"] = clients_widget
         self.content_area.addWidget(clients_widget)
+
+        suppliers_widget = SuppliersWidget(self.db_manager, self.current_user)
+        self.widgets["suppliers"] = suppliers_widget
+        self.content_area.addWidget(suppliers_widget)
+
+        supplier_payments_widget = SupplierPaymentsWidget(self.db_manager, self.current_user)
+        self.widgets["supplier_payments"] = supplier_payments_widget
+        self.content_area.addWidget(supplier_payments_widget)
         
         # Gas Products widget
         gas_products_widget = GasProductsWidget(self.db_manager, self.current_user)
@@ -675,9 +687,9 @@ class MainWindow(QMainWindow):
         enabled_modules = ['dashboard']
         
         if role == 'Admin':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'employees', 'reports', 'settings']
+            enabled_modules = ['dashboard', 'clients', 'suppliers', 'supplier_payments', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'employees', 'reports', 'settings']
         elif role == 'Accountant':
-            enabled_modules = ['dashboard', 'clients', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'reports']
+            enabled_modules = ['dashboard', 'clients', 'suppliers', 'supplier_payments', 'gas_products', 'cylinder_availability', 'sales', 'receipts', 'daily_transactions', 'weekly_payments', 'cylinder_track', 'reports']
         elif role == 'Gate Operator':
             enabled_modules = ['dashboard', 'daily_transactions', 'cylinder_availability']
         elif role == 'Driver':
@@ -704,6 +716,8 @@ class MainWindow(QMainWindow):
             page_titles = {
                 "dashboard": "Dashboard",
                 "clients": "Client Management",
+                "suppliers": "Supplier Management",
+                "supplier_payments": "Supplier Payments",
                 "gas_products": "Gas Products",
                 "cylinder_availability": "Cylinder Availability",
                 "sales": "Sales & Billing",
@@ -728,10 +742,18 @@ class MainWindow(QMainWindow):
             elif page_name == "gas_products":
                 if hasattr(self.widgets['gas_products'], 'load_products'):
                     self.widgets['gas_products'].load_products()
+            elif page_name == "suppliers":
+                if hasattr(self.widgets['suppliers'], 'load_suppliers'):
+                    self.widgets['suppliers'].load_suppliers()
+            elif page_name == "supplier_payments":
+                if hasattr(self.widgets['supplier_payments'], 'load_data'):
+                    self.widgets['supplier_payments'].load_data()
             elif page_name == "cylinder_availability":
                 if hasattr(self.widgets['cylinder_availability'], 'load_data'):
                     self.widgets['cylinder_availability'].load_data()
             elif page_name == "sales":
+                if hasattr(self.widgets['sales'], 'load_suppliers'):
+                    self.widgets['sales'].load_suppliers()
                 if hasattr(self.widgets['sales'], 'load_gas_products'):
                     self.widgets['sales'].load_gas_products()
                 if hasattr(self.widgets['sales'], 'load_recent_sales'):

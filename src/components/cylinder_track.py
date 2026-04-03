@@ -1,11 +1,12 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QTableWidget, QTableWidgetItem, QPushButton, QDialog,
-    QFormLayout, QDialogButtonBox, QSpinBox, QMessageBox,
+    QFormLayout, QDialogButtonBox, QSpinBox, QMessageBox, QDoubleSpinBox, QTextEdit,
     QFrame, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
 from src.database_module import DatabaseManager
+from src.components.ui_helpers import refresh_application_views
 
 
 class ReturnDialog(QDialog):
@@ -74,21 +75,98 @@ class ReturnDialog(QDialog):
                 cap,
                 qty
             )
-            try:
-                from PySide6.QtWidgets import QApplication
-                mw = None
-                for w in QApplication.topLevelWidgets():
-                    if hasattr(w, 'refresh_dashboard'):
-                        mw = w
-                        break
-                if mw:
-                    mw.refresh_dashboard()
-                    mw.refresh_current_page("cylinder_availability")
-            except Exception:
-                pass
+            refresh_application_views("cylinder_availability", "cylinder_track", "weekly_payments", "reports")
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to save return: {str(e)}")
+
+
+class LPGRefillDialog(QDialog):
+    def __init__(self, db_manager: DatabaseManager, client: dict, product_row: dict, parent=None):
+        super().__init__(parent)
+        self.db_manager = db_manager
+        self.client = client
+        self.product_row = product_row
+        self.setWindowTitle("Record LPG Refill")
+        self.setFixedSize(440, 320)
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setStyleSheet("""
+            QDialog { background-color: #f5f6f8; }
+            QLabel { color: #1f2937; font-size: 13px; }
+            QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit {
+                background: #ffffff;
+                border: 1px solid #cfd7df;
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 28px;
+            }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+
+        prod_name = f"{self.product_row['gas_type']} {self.product_row['capacity']}".strip()
+        form.addRow("Product:", QLabel(prod_name))
+        form.addRow("Empty Balance:", QLabel(str(int(self.product_row.get('empty_balance') or 0))))
+
+        self.qty_spin = QSpinBox()
+        self.qty_spin.setRange(1, max(1, int(self.product_row.get('empty_balance') or 0)))
+        self.qty_spin.setValue(max(1, int(self.product_row.get('empty_balance') or 0)))
+        form.addRow("Refill Qty:", self.qty_spin)
+
+        self.supplier_combo = QComboBox()
+        self.supplier_combo.addItem("Company Stock / No Supplier", None)
+        for supplier in self.db_manager.get_suppliers():
+            self.supplier_combo.addItem(supplier['name'], supplier)
+        form.addRow("Source Supplier:", self.supplier_combo)
+
+        self.unit_price_spin = QDoubleSpinBox()
+        self.unit_price_spin.setRange(0, 1000000)
+        self.unit_price_spin.setDecimals(2)
+        self.unit_price_spin.setPrefix("Rs. ")
+        form.addRow("Unit Price:", self.unit_price_spin)
+
+        self.notes_input = QTextEdit()
+        self.notes_input.setMaximumHeight(80)
+        self.notes_input.setPlaceholderText("Optional notes for this refill entry")
+        form.addRow("Notes:", self.notes_input)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _save(self):
+        try:
+            product_id = self.db_manager.resolve_tracking_product_id(
+                self.product_row['gas_type'],
+                self.product_row['capacity'],
+                self.product_row.get('sub_type'),
+            )
+            if not product_id:
+                raise ValueError("No LPG product configuration was found for this row.")
+            supplier = self.supplier_combo.currentData()
+            current_user = getattr(self.parent(), 'current_user', {}) or {}
+            self.db_manager.add_lpg_refill(
+                client_id=self.client['id'],
+                gas_product_id=product_id,
+                quantity=int(self.qty_spin.value()),
+                supplier_id=supplier['id'] if supplier else None,
+                unit_price=float(self.unit_price_spin.value()),
+                notes=self.notes_input.toPlainText().strip(),
+                created_by=current_user.get('id') if isinstance(current_user, dict) else None,
+            )
+            refresh_application_views("cylinder_track", "supplier_payments", "weekly_payments", "daily_transactions", "reports")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to save LPG refill: {str(e)}")
 
 
 class CylinderTrackWidget(QWidget):
@@ -155,9 +233,9 @@ class CylinderTrackWidget(QWidget):
         table_layout = QVBoxLayout(table_card)
         table_layout.setContentsMargins(10, 10, 10, 10)
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "Product", "Capacity", "Delivered", "Returned", "Pending", "Status", "Actions"
+            "Product", "Capacity", "Delivered", "Returned", "Pending Client", "LPG Refilled", "Empty Balance", "Status", "Actions"
         ])
         self._setup_table_base()
         self._set_table_mode_details()
@@ -193,8 +271,10 @@ class CylinderTrackWidget(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.Fixed)
-        self.table.setColumnWidth(6, 96)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.Fixed)
+        self.table.setColumnWidth(8, 126)
 
     def load_clients(self):
         try:
@@ -246,9 +326,9 @@ class CylinderTrackWidget(QWidget):
             self.table.setRowHeight(i, 38)
 
     def _populate(self, rows):
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "Product", "Capacity", "Delivered", "Returned", "Pending", "Status", "Actions"
+            "Product", "Capacity", "Delivered", "Returned", "Pending Client", "LPG Refilled", "Empty Balance", "Status", "Actions"
         ])
         self._set_table_mode_details()
         self.table.setRowCount(len(rows))
@@ -259,12 +339,14 @@ class CylinderTrackWidget(QWidget):
             self.table.setItem(i, 2, QTableWidgetItem(str(int(r['delivered']))))
             self.table.setItem(i, 3, QTableWidgetItem(str(int(r['returned']))))
             self.table.setItem(i, 4, QTableWidgetItem(str(int(r['pending']))))
+            self.table.setItem(i, 5, QTableWidgetItem(str(int(r.get('refilled') or 0))))
+            self.table.setItem(i, 6, QTableWidgetItem(str(int(r.get('empty_balance') or 0))))
             status_item = QTableWidgetItem(r.get('status') or ('Done' if int(r['pending']) == 0 else 'Pending'))
             if int(r['pending']) > 0:
                 status_item.setForeground(Qt.darkYellow)
             else:
                 status_item.setForeground(Qt.darkGreen)
-            self.table.setItem(i, 5, status_item)
+            self.table.setItem(i, 7, status_item)
 
             actions_widget = QWidget()
             h = QHBoxLayout(actions_widget)
@@ -272,11 +354,11 @@ class CylinderTrackWidget(QWidget):
             h.setSpacing(2)
             h.setAlignment(Qt.AlignCenter)
             btn = QPushButton("Return")
-            btn.setMinimumWidth(58)
+            btn.setFixedWidth(52)
             btn.setFixedHeight(22)
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setStyleSheet(
-                "QPushButton { background-color: #1a73e8; color: white; border: 1px solid #125bc4; border-radius: 5px; padding: 2px 6px; font-size: 10px; font-weight: 600; }"
+                "QPushButton { background-color: #1a73e8; color: white; border: 1px solid #125bc4; border-radius: 5px; padding: 1px 4px; font-size: 10px; font-weight: 600; }"
                 "QPushButton:hover { background-color: #1765cb; }"
                 "QPushButton:pressed { background-color: #125bc4; }"
                 "QPushButton:disabled { background-color: #aab7c4; border-color: #9aa8b6; color: #eef2f6; }"
@@ -290,5 +372,28 @@ class CylinderTrackWidget(QWidget):
                     self.refresh_data()
             btn.clicked.connect(lambda _checked=False, row_data=r: open_dialog(row_data))
             h.addWidget(btn)
-            self.table.setCellWidget(i, 6, actions_widget)
+            refill_btn = QPushButton("Refill")
+            refill_btn.setFixedWidth(52)
+            refill_btn.setFixedHeight(22)
+            refill_btn.setFocusPolicy(Qt.NoFocus)
+            refill_btn.setStyleSheet(
+                "QPushButton { background-color: #16a085; color: white; border: 1px solid #117864; border-radius: 5px; padding: 1px 4px; font-size: 10px; font-weight: 600; }"
+                "QPushButton:hover { background-color: #138d75; }"
+                "QPushButton:pressed { background-color: #117864; }"
+                "QPushButton:disabled { background-color: #aab7c4; border-color: #9aa8b6; color: #eef2f6; }"
+            )
+            refill_btn.setEnabled(
+                self.current_client is not None
+                and r.get('gas_type') == 'LPG'
+                and int(r.get('empty_balance') or 0) > 0
+            )
+            def open_refill_dialog(row_data=r):
+                if not self.current_client:
+                    return
+                dlg = LPGRefillDialog(self.db_manager, self.current_client, row_data, self)
+                if dlg.exec() == QDialog.Accepted:
+                    self.refresh_data()
+            refill_btn.clicked.connect(lambda _checked=False, row_data=r: open_refill_dialog(row_data))
+            h.addWidget(refill_btn)
+            self.table.setCellWidget(i, 8, actions_widget)
             self.table.setRowHeight(i, 34)
